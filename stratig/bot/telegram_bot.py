@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from functools import wraps
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
@@ -139,6 +140,7 @@ class TelegramBot:
             ("pnl", self._pnl),
             ("scan", self._scan),
             ("scanall", self._scan_all),
+            ("data", self._data),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -390,6 +392,50 @@ class TelegramBot:
             f"المدة: {self.trader.last_scan_duration:.1f} ثانية{extra}",
             parse_mode=ParseMode.HTML,
         )
+
+    @restricted
+    async def _data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """يعرض مصدر البيانات: هل الشموع حقيقية من المنصة أم محاكاة؟"""
+        msg = await self._reply(update, "🔎 جارٍ التحقق من مصدر البيانات…")
+        trader = self.trader
+        exchange = trader.exchange
+        symbol = (trader.symbols() or ["BTCUSDT"])[0]
+        try:
+            candles = await self._to_thread(exchange.klines, symbol,
+                                            str(self.cfg.get("strategy.timeframe", "15m")), 10)
+            price = await self._to_thread(exchange.mark_price, symbol)
+        except Exception as err:
+            await msg.edit_text(f"❌ تعذّر الاتصال بالمنصة:\n<code>{fmt.esc(str(err))}</code>",
+                                parse_mode=ParseMode.HTML)
+            return
+
+        last_ts = candles.times[-1] / 1000
+        age = (time.time() - last_ts) / 60
+        stamp = time.strftime("%Y-%m-%d %H:%M", time.gmtime(last_ts))
+        url = getattr(exchange, "api_url", None) or "—"
+
+        lines = [
+            "🔎 <b>مصدر البيانات</b>",
+            "",
+            f"المنصة: <code>{fmt.esc(exchange.name)}</code>",
+            f"الرابط: <code>{fmt.esc(str(url))}</code>",
+            f"الشبكة: {'تيستنت (أموال وهمية)' if exchange.testnet else 'حقيقي 🔴'}",
+            f"المحاكاة: {'مُفعّلة — لا تُرسل أوامر 🧪' if self.cfg.get('safety.dry_run') else 'معطّلة — تُرسل أوامر'}",
+            "",
+            f"آخر شمعة <code>{fmt.esc(symbol)}</code>:",
+            f"  الوقت (UTC): {stamp}",
+            f"  الإغلاق: <code>{fmt.num(candles.close[-1])}</code>",
+            f"  السعر الآن: <code>{fmt.num(price)}</code>",
+            f"  عمرها: {age:.1f} دقيقة",
+            "",
+            "✅ <b>الشموع حقيقية</b> — مأخوذة مباشرة من API المنصة.",
+            "❌ لا تُستخدم أي بيانات اصطناعية في التشغيل الفعلي.",
+        ]
+        if exchange.testnet:
+            lines += ["", "ℹ️ الأسعار من السوق التجريبي لBinance، والأموال وهمية."]
+        if age > 90:
+            lines += ["", "⚠️ آخر شمعة قديمة — تحقّق من اتصال الإنترنت."]
+        await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

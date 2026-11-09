@@ -67,6 +67,7 @@ class BinanceFutures(ExchangeBase):
             secret=self.api_secret,
             base_url=self.TESTNET_URL if testnet else self.MAINNET_URL,
         )
+        self.api_url = self.TESTNET_URL if testnet else self.MAINNET_URL
         self._info: dict | None = None
         self._info_ts = 0.0
         self._dual_side: bool | None = None
