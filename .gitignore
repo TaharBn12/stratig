@@ -1,0 +1,27 @@
+# بيئة بايثون
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# أسرار — مهم جداً
+.env
+.env.*
+!.env.example
+
+# بيانات وقت التشغيل
+logs/
+state/
+*.log
+*.db
+*.sqlite3
+
+# نظام/محرر
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

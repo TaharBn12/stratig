@@ -1,0 +1,16 @@
+# --- Telegram ---
+python-telegram-bot>=22.0,<23
+
+# --- Exchanges ---
+binance-futures-connector>=4.0      # Binance USDT-M Futures (يدعم testnet)
+pybit>=5.6                          # Bybit (اختياري)
+
+# --- Data / indicators ---
+pandas>=2.0
+numpy>=1.24
+ta>=0.10
+
+# --- Misc ---
+PyYAML>=6.0
+python-dotenv>=1.0
+requests>=2.31
