@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import logging
 
-import pandas as pd
-
+from ..data import Candles, make_candles
 from .base import (
     BUY,
     SELL,
@@ -22,7 +21,6 @@ from .base import (
     Position,
     SymbolInfo,
     interval_to_minutes,
-    make_klines,
     round_step,
 )
 
@@ -82,14 +80,14 @@ class BybitFutures(ExchangeBase):
         out = [s for s, _ in rows]
         return out[:top_n] if top_n and top_n > 0 else out
 
-    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> pd.DataFrame:
+    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> Candles:
         raw = self.session.get_kline(
             category=self.category,
             symbol=symbol,
             interval=interval_to_minutes(interval),
             limit=int(limit),
         )["result"]["list"]
-        return make_klines(raw, reverse=True)
+        return make_candles(raw, reverse=True)   # Bybit: الأحدث أولاً
 
     def mark_price(self, symbol: str) -> float:
         resp = self.session.get_tickers(category=self.category, symbol=symbol)["result"]["list"]

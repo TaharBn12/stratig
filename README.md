@@ -58,7 +58,10 @@ python3 -m venv .venv
 source .venv/bin/activate          # ويندوز: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
-> لا حاجة لأي مصنّف C++ : الإعدادات TOML (مكتبة قياسية) والمؤشرات محسوبة داخلياً بـ pandas.
+> **لا يحتاج أي مكتبة مترجَمة C/C++**: لا `numpy` ولا `pandas` ولا `PyYAML` ولا `ta` —
+> الإعدادات TOML (مكتبة قياسية)، الشموع في حاوية `list` بسيطة،
+> والمؤشرات (RSI / Williams %R / EMA) محسوبة ببايثون خالص.
+> هذا يتفادى أخطاء مثل `DLL load failed` و `Microsoft Visual C++ 14.0 is required`.
 
 ### 5) تحقّق ثم تشغيل
 ```bash
@@ -192,6 +195,7 @@ stratig/
 ├── Dockerfile / docker-compose.yml / stratig-bot.service
 ├── stratig/
 │   ├── config.py               # تحميل config.toml + .env
+│   ├── data.py                 # حاوية الشموع (بدون pandas)
 │   ├── utils.py                # أدوات مشتركة
 │   ├── logging_setup.py
 │   ├── exchanges/
@@ -199,7 +203,7 @@ stratig/
 │   │   ├── binance_futures.py  # Binance USDT-M (تيستنت + حقيقي)
 │   │   └── bybit.py            # Bybit (pybit)
 │   ├── strategy/
-│   │   ├── indicators.py       # RSI + Williams %R
+│   │   ├── indicators.py       # RSI + Williams %R + EMA (بايثون خالص)
 │   │   └── engine.py           # الدمج والتأكيد المزدوج
 │   ├── services/
 │   │   ├── trader.py           # الفحص، الإشارات، التنفيذ، المخاطرة

@@ -14,16 +14,17 @@ from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
-import pandas as pd
+from ..data import Candles, make_candles
 
 BUY = "buy"
 SELL = "sell"
 
-KLINE_COLUMNS = ["Time", "Open", "High", "Low", "Close", "Volume", "Turnover"]
-
 
 class ExchangeError(Exception):
     """أي خطأ من المنصة أو من طبقة التحويل."""
+
+
+KLINE_COLUMNS = ["Time", "Open", "High", "Low", "Close", "Volume", "Turnover"]
 
 
 @dataclass
@@ -110,25 +111,6 @@ def interval_to_minutes(interval: Any) -> int:
     return 15
 
 
-def make_klines(raw: list, reverse: bool) -> pd.DataFrame:
-    """بناء DataFrame من مصفوفة الشموع.
-
-    reverse=True  عندما تعيد المنصة الأحدث أولاً (مثل Bybit)
-    reverse=False عندما تعيد الأقدم أولاً (مثل Binance)
-    النتيجة في الحالتين: آخر صف = أحدث شمعة.
-    """
-    if not raw:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
-    df = pd.DataFrame(raw)
-    df = df.iloc[:, : len(KLINE_COLUMNS)]
-    df.columns = KLINE_COLUMNS[: df.shape[1]]
-    df = df.set_index("Time")
-    df = df.astype(float)
-    if reverse:
-        df = df[::-1]
-    return df
-
-
 class ExchangeBase(ABC):
     """الواجهة المشتركة — كل منصة تطبّق هذه الدوال."""
 
@@ -137,7 +119,7 @@ class ExchangeBase(ABC):
 
     # ---------- بيانات السوق ----------
     @abstractmethod
-    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> pd.DataFrame: ...
+    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> Candles: ...
 
     @abstractmethod
     def mark_price(self, symbol: str) -> float: ...

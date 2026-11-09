@@ -167,10 +167,11 @@ def test_usdt_symbols_excludes_blocked():
 
 def test_klines_are_oldest_first():
     ex = make_exchange()
-    df = ex.klines("BTCUSDT", "15m", 10)
-    assert len(df) == 10
-    assert list(df.columns) == ["Open", "High", "Low", "Close", "Volume", "Turnover"]
-    assert df.index[0] < df.index[-1]           # آخر صف = أحدث شمعة
+    candles = ex.klines("BTCUSDT", "15m", 10)
+    assert len(candles) == 10
+    assert candles.close[-1] == 10.5            # آخر عنصر = أحدث شمعة
+    assert candles.times[0] < candles.times[-1]
+    assert len(candles.high) == len(candles.low) == 10
 
 
 def test_balance_parses_usdt():
