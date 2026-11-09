@@ -30,6 +30,22 @@ from .base import (
 
 log = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────────────
+# تغيير جوهري في Binance (ساري منذ 2025-12-09):
+# الأوامر الشرطية (STOP / STOP_MARKET / TAKE_PROFIT / TAKE_PROFIT_MARKET /
+# TRAILING_STOP_MARKET) انتقلت من POST /fapi/v1/order إلى نقاط Algo.
+# إرسالها للنقطة القديمة يُرجع الخطأ -4120:
+#   "Order type not supported for this endpoint.
+#    Please use the Algo Order API endpoints instead."
+# النقاط الجديدة:
+#   POST   /fapi/v1/algoOrder      (algoType=CONDITIONAL, triggerPrice)
+#   GET    /fapi/v1/openAlgoOrders
+#   DELETE /fapi/v1/algoOrder      (algoId)
+# ملاحظة: اسم حقل سعر الإطلاق تغيّر من stopPrice إلى triggerPrice.
+# ─────────────────────────────────────────────────────────────────────
+ALGO_ORDER_PATH = "/fapi/v1/algoOrder"
+OPEN_ALGO_PATH = "/fapi/v1/openAlgoOrders"
+
 # أكواد أخطاء بنانس التي يمكن تجاهلها بأمان
 IGNORED_ERRORS = {
     -4046: "نوع الهامش مضبوط مسبقاً",
@@ -256,6 +272,110 @@ class BinanceFutures(ExchangeBase):
             return {"positionSide": "LONG" if side == BUY else "SHORT"}
         return {}
 
+    # ═══════════════════ أوامر Algo (الشرطية) ═══════════════════
+    def _signed(self, method: str, path: str, params: dict | None = None) -> Any:
+        """نداء REST موقّع — عبر موصّل Binance إن توفّر، وإلا توقيع يدوي."""
+        payload: dict[str, Any] = {k: v for k, v in (params or {}).items() if v is not None}
+        payload.update(self._rw())
+        sign_request = getattr(self.client, "sign_request", None)
+        if callable(sign_request):
+            return sign_request(method, path, payload)
+        return self._sign_manually(method, path, payload)
+
+    def _sign_manually(self, method: str, path: str, payload: dict) -> Any:
+        """توقيع HMAC-SHA256 يدوي (احتياط عند غياب sign_request في الموصّل)."""
+        import hashlib
+        import hmac
+        import urllib.parse
+
+        request = import_module_safely("requests", "request")
+        params = dict(payload)
+        params["timestamp"] = int(time.time() * 1000)
+        query = urllib.parse.urlencode(params, doseq=True)
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        response = request(
+            method,
+            f"{self.api_url}{path}?{query}&signature={signature}",
+            headers={"X-MBX-APIKEY": self.api_key},
+            timeout=20,
+        )
+        try:
+            data = response.json()
+        except Exception:  # pragma: no cover — ردّ غير JSON
+            data = {}
+        if int(getattr(response, "status_code", 200) or 200) >= 400:
+            raise ExchangeError(
+                f"({response.status_code}, {data.get('code')}, {data.get('msg')!r})"
+            )
+        if isinstance(data, dict) and data.get("code", 0) not in (0, None, "200"):
+            raise ExchangeError(f"({data.get('code')}, {data.get('msg')})")
+        return data
+
+    def place_conditional_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        trigger_price: float,
+        precision: int = 8,
+        working_type: str = "CONTRACT_PRICE",
+        close_position: bool = True,
+        quantity: str | None = None,
+        position_side: str | None = None,
+        client_algo_id: str | None = None,
+    ) -> dict:
+        """يضع أمراً شرطياً (وقف خسارة / جني أرباح) على نقطة Algo."""
+        params: dict[str, Any] = {
+            "algoType": "CONDITIONAL",
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "triggerPrice": fmt_num(trigger_price, precision),
+            "workingType": working_type,
+        }
+        if close_position:
+            # يُغلق كامل الصفقة عند الإطلاق — لا يجوز إرسال quantity/reduceOnly معه
+            params["closePosition"] = "true"
+        else:
+            params["quantity"] = quantity
+            params["reduceOnly"] = "true"   # ممنوع في وضع Hedge
+        if position_side:
+            params["positionSide"] = position_side
+        if client_algo_id:
+            params["clientAlgoId"] = str(client_algo_id)[:36]
+        return self._signed("POST", ALGO_ORDER_PATH, params)
+
+    def open_algo_orders(self, symbol: str | None = None) -> list[dict]:
+        """قائمة الأوامر الشرطية المفتوحة (وقف/هدف) لرمز أو لكل الحساب."""
+        payload = {"symbol": symbol} if symbol else {}
+        resp = self._signed("GET", OPEN_ALGO_PATH, payload)
+        if isinstance(resp, dict):
+            orders = resp.get("orders") or []
+        else:
+            orders = resp or []
+        return [o for o in orders if isinstance(o, dict)]
+
+    def cancel_algo_orders(self, symbol: str) -> int:
+        """يلغي كل الأوامر الشرطية المفتوحة على الرمز (بعد إغلاق الصفقة)."""
+        try:
+            orders = self.open_algo_orders(symbol)
+        except Exception as err:
+            log.debug("[%s] تعذّر جلب أوامر algo المفتوحة: %s", symbol, err)
+            return 0
+        cancelled = 0
+        for order in orders:
+            algo_id = order.get("algoId")
+            if not algo_id:
+                continue
+            try:
+                self._signed("DELETE", ALGO_ORDER_PATH, {"symbol": symbol, "algoId": algo_id})
+                cancelled += 1
+            except Exception as err:
+                log.warning("[%s] تعذّر إلغاء أمر algo %s: %s", symbol, algo_id, err)
+        return cancelled
+
     # ═══════════════════ التنفيذ ═══════════════════
     def _calc_qty(self, info: SymbolInfo, qty_usdt: float, price: float, min_notional: float) -> float:
         """يحسب الكمية من قيمة الدولار مع احترام stepSize / minQty / minNotional."""
@@ -344,8 +464,7 @@ class BinanceFutures(ExchangeBase):
             raw=resp,
         )
 
-        # ── جني الأرباح ووقف الخسارة ──
-        close_side = "SELL" if side == BUY else "BUY"
+        # ── جني الأرباح ووقف الخسارة (نقطة Algo بعد تغيير Binance) ──
         working = "MARK_PRICE" if str(tp_trigger).lower() == "mark_price" else "CONTRACT_PRICE"
         if side == BUY:
             tp_price = fill_price * (1 + tp_pct)
@@ -354,38 +473,18 @@ class BinanceFutures(ExchangeBase):
             tp_price = fill_price * (1 - tp_pct)
             sl_price = fill_price * (1 + sl_pct)
 
-        try:
-            self.client.new_order(
-                symbol=symbol,
-                side=close_side,
-                type="TAKE_PROFIT_MARKET",
-                stopPrice=fmt_num(tp_price, info.price_precision),
-                closePosition="true",
-                workingType=working,
-                **self._side_extra(side),
-                **self._rw(),
-            )
+        if self._place_protection(symbol, result, side, "TAKE_PROFIT_MARKET", tp_price, info, qty, working):
             result.tp_price = round(tp_price, info.price_precision)
-        except Exception as err:
-            log.error("[%s] فشل وضع أمر جني الأرباح: %s", symbol, err)
-        try:
-            self.client.new_order(
-                symbol=symbol,
-                side=close_side,
-                type="STOP_MARKET",
-                stopPrice=fmt_num(sl_price, info.price_precision),
-                closePosition="true",
-                workingType=working,
-                **self._side_extra(side),
-                **self._rw(),
-            )
+        if self._place_protection(symbol, result, side, "STOP_MARKET", sl_price, info, qty, working):
             result.sl_price = round(sl_price, info.price_precision)
-        except Exception as err:
-            log.error("[%s] فشل وضع أمر وقف الخسارة: %s", symbol, err)
 
         if result.sl_price is None:
             # أمان: لا نترك صفقة بلا حماية
             log.error("[%s] لم يُضبط وقف الخسارة — سيتم إغلاق الصفقة فوراً", symbol)
+            try:
+                self.cancel_algo_orders(symbol)   # لا نترك هدفاً يفتح صفقة لاحقاً
+            except Exception as err:  # pragma: no cover
+                log.warning("[%s] تعذّر إلغاء أوامر algo: %s", symbol, err)
             try:
                 self.close_position(symbol)
             except Exception as err:  # pragma: no cover
@@ -395,6 +494,54 @@ class BinanceFutures(ExchangeBase):
             )
         return result
 
+    def _place_protection(
+        self,
+        symbol: str,
+        result: OrderResult,
+        side: str,
+        order_type: str,
+        trigger_price: float,
+        info: SymbolInfo,
+        qty: float,
+        working_type: str,
+    ) -> bool:
+        """يضع أمر حماية (هدف/وقف) عبر نقطة Algo. يُرجع True عند النجاح."""
+        tag = "جني الأرباح" if order_type == "TAKE_PROFIT_MARKET" else "وقف الخسارة"
+        close_side = "SELL" if side == BUY else "BUY"
+        position_side = ("LONG" if side == BUY else "SHORT") if self._dual_side else None
+
+        # المحاولة الأساسية: closePosition (يُغلق كل الصفقة)
+        # الاحتياط: quantity + reduceOnly (بعض الحسابات ترفض closePosition)
+        attempts: list[dict] = [{"close_position": True, "quantity": None}]
+        if not self._dual_side:
+            attempts.append(
+                {"close_position": False, "quantity": fmt_num(qty, info.qty_precision)}
+            )
+
+        last_err: Exception | None = None
+        for attempt in attempts:
+            try:
+                resp = self.place_conditional_order(
+                    symbol=symbol,
+                    side=close_side,
+                    order_type=order_type,
+                    trigger_price=trigger_price,
+                    precision=info.price_precision,
+                    working_type=working_type,
+                    position_side=position_side,
+                    close_position=attempt["close_position"],
+                    quantity=attempt["quantity"],
+                )
+                algo_id = str((resp or {}).get("algoId") or "")
+                if algo_id:
+                    result.algo_ids.append(algo_id)
+                return True
+            except Exception as err:
+                last_err = err
+                log.warning("[%s] محاولة وضع %s فشلت: %s", symbol, tag, err)
+        log.error("[%s] فشل وضع أمر %s: %s", symbol, tag, last_err)
+        return False
+
     def close_position(self, symbol: str) -> OrderResult | None:
         pos = self.get_position(symbol)
         if not pos:
@@ -403,6 +550,10 @@ class BinanceFutures(ExchangeBase):
             self.client.cancel_open_orders(symbol=symbol, **self._rw())
         except Exception as err:
             log.debug("[%s] لا توجد أوامر معلقة للإلغاء: %s", symbol, err)
+        # أوامر الوقف/الهدف تعيش على نقطة Algo ولا تلغيها cancel_open_orders؛
+        # تركها يفتح صفقة جديدة بالخطأ عند إطلاقها لاحقاً.
+        if not self.dry_run:
+            self.cancel_algo_orders(symbol)
 
         info = self.symbol_info(symbol)
         close_side = "SELL" if pos.side == BUY else "BUY"

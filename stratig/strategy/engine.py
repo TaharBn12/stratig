@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..data import Candles, NAN
+from ..utils import esc
 from .indicators import BUY, SELL, IndicatorResult, rsi_signal, williams_r_signal
 
 
@@ -38,7 +39,8 @@ class Decision:
             if ind is None:
                 continue
             mark = "🔼" if ind.side == BUY else ("🔽" if ind.side == SELL else "➖")
-            lines.append(f"  {mark} <b>{ind.name}</b>: {ind.reason}")
+            # سبب المؤشر قد يحتوي على < أو > (مثال: 72.4 < 70) وهذا يكسر HTML تليجرام
+            lines.append(f"  {mark} <b>{esc(ind.name)}</b>: {esc(ind.reason)}")
         return "\n".join(lines)
 
 

@@ -71,6 +71,8 @@ class OrderResult:
     notional: float = 0.0
     simulated: bool = False
     raw: Any = field(default=None, repr=False)
+    # معرّفات أوامر Algo الشرطية (وقف الخسارة / جني الأرباح) لإلغائها لاحقاً
+    algo_ids: list = field(default_factory=list)
 
 
 # ───────────────────────── أدوات مساعدة ─────────────────────────

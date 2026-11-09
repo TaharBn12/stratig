@@ -132,6 +132,16 @@ class FakeClient:
     def cancel_open_orders(self, symbol, **kwargs):
         self.calls.append(("cancel_open_orders", symbol))
 
+    # ── نقاط Algo (الأوامر الشرطية بعد تغيير Binance في 2025-12-09) ──
+    def sign_request(self, http_method, url_path, payload=None, **kwargs):
+        payload = dict(payload or {})
+        self.calls.append(("sign_request", http_method, url_path, payload))
+        if url_path.endswith("/openAlgoOrders"):
+            return {"orders": [{"algoId": 555, "symbol": "BTCUSDT", "algoStatus": "NEW"}]}
+        if self.fail_stop_loss and payload.get("type") == "STOP_MARKET":
+            raise RuntimeError("boom")
+        return {"algoId": 98765, "clientAlgoId": "", "algoStatus": "NEW"}
+
     def reset_positions(self):
         self.amounts = {"BTCUSDT": "0", "ETHUSDT": "-2"}
 
@@ -203,23 +213,79 @@ def test_recent_pnl_sums_income():
 
 
 # ═══════════════════════ التنفيذ ═══════════════════════
-def test_open_market_places_entry_tp_and_sl():
+def _algo_calls(ex, method="POST"):
+    return [c for c in ex.client.calls if c[0] == "sign_request" and c[1] == method]
+
+
+def test_open_market_places_entry_on_regular_endpoint():
+    """أمر الدخول فقط يبقى على /fapi/v1/order."""
     ex = make_exchange()
     result = ex.open_market("BTCUSDT", "buy", 60, 0.012, 0.009, leverage=10, margin_mode="isolated")
 
     kinds = [c for c in ex.client.calls if c[0] == "new_order"]
-    assert [c[3] for c in kinds] == ["MARKET", "TAKE_PROFIT_MARKET", "STOP_MARKET"]
+    assert [c[3] for c in kinds] == ["MARKET"]
     assert kinds[0][4]["quantity"] == "0.002"            # 60/30000 = 0.002
-    assert kinds[1][4]["stopPrice"] == "30360.00"        # +1.2%
-    assert kinds[2][4]["stopPrice"] == "29730.00"        # -0.9%
-    assert kinds[1][4]["closePosition"] == "true"
     assert result.qty == 0.002
     assert result.price == 30000.0
-    assert result.tp_price == pytest.approx(30360.0)
-    assert result.sl_price == pytest.approx(29730.0)
 
     assert ("change_margin_type", "BTCUSDT", "ISOLATED") in ex.client.calls
     assert ("change_leverage", "BTCUSDT", 10) in ex.client.calls
+
+
+def test_open_market_places_tp_sl_on_algo_endpoint():
+    """الوقف والهدف يذهبان إلى /fapi/v1/algoOrder بصيغة Binance الجديدة."""
+    ex = make_exchange()
+    result = ex.open_market("BTCUSDT", "buy", 60, 0.012, 0.009)
+
+    algos = _algo_calls(ex)
+    assert [c[2] for c in algos] == ["/fapi/v1/algoOrder"] * 2
+    assert [c[3]["type"] for c in algos] == ["TAKE_PROFIT_MARKET", "STOP_MARKET"]
+    for call in algos:
+        assert call[3]["algoType"] == "CONDITIONAL"
+        assert call[3]["closePosition"] == "true"
+        assert call[3]["workingType"] == "MARK_PRICE"   # الافتراضي: سعر المارك
+        assert "stopPrice" not in call[3]                # الاسم القديم يفشل بصمت
+    assert algos[0][3]["triggerPrice"] == "30360.00"     # +1.2%
+    assert algos[1][3]["triggerPrice"] == "29730.00"     # -0.9%
+    assert algos[0][3]["side"] == "SELL"
+
+    assert result.tp_price == pytest.approx(30360.0)
+    assert result.sl_price == pytest.approx(29730.0)
+    assert result.algo_ids == ["98765", "98765"]
+
+
+def test_open_market_tp_trigger_contract_price():
+    ex = make_exchange()
+    ex.open_market("BTCUSDT", "buy", 60, 0.012, 0.009, tp_trigger="contract_price")
+    for call in _algo_calls(ex):
+        assert call[3]["workingType"] == "CONTRACT_PRICE"
+
+
+def test_protection_falls_back_to_reduce_only_when_closeposition_rejected():
+    """إن رفضت المنصة closePosition نعيد بالمحاولة بـ quantity + reduceOnly."""
+    ex = make_exchange()
+    attempts: list[dict] = []
+
+    def fake_sign(method, path, payload=None, **kwargs):
+        payload = dict(payload or {})
+        if method == "POST":
+            attempts.append(payload)
+            if payload.get("closePosition") == "true":
+                raise RuntimeError("-4120 closePosition not supported")
+            return {"algoId": 111}
+        return ex.client.sign_request(method, path, payload, **kwargs)
+
+    original = ex.client.sign_request
+    ex.client.sign_request = fake_sign
+    result = ex.open_market("BTCUSDT", "buy", 60, 0.012, 0.009)
+
+    assert len(attempts) == 4                               # محاولتان لكل أمر
+    assert all(a["algoType"] == "CONDITIONAL" for a in attempts)
+    fallback = [a for a in attempts if a.get("reduceOnly") == "true"]
+    assert len(fallback) == 2
+    assert all("closePosition" not in a for a in fallback)
+    assert result.sl_price == pytest.approx(29730.0)
+    ex.client.sign_request = original
 
 
 def test_open_market_short_side_prices():
@@ -227,8 +293,10 @@ def test_open_market_short_side_prices():
     ex.open_market("BTCUSDT", "sell", 60, 0.012, 0.009)
     orders = [c for c in ex.client.calls if c[0] == "new_order"]
     assert orders[0][2] == "SELL"
-    assert orders[1][4]["stopPrice"] == "29640.00"       # TP تحت السعر للشورت
-    assert orders[2][4]["stopPrice"] == "30270.00"       # SL فوق السعر للشورت
+    algos = _algo_calls(ex)
+    assert algos[0][3]["triggerPrice"] == "29640.00"     # TP تحت السعر للشورت
+    assert algos[1][3]["triggerPrice"] == "30270.00"     # SL فوق السعر للشورت
+    assert algos[0][3]["side"] == "BUY"
 
 
 def test_min_notional_is_enforced():
@@ -250,10 +318,21 @@ def test_missing_stop_loss_triggers_emergency_close():
     ex = make_exchange(fail_stop_loss=True)
     with pytest.raises(ExchangeError):
         ex.open_market("BTCUSDT", "buy", 60, 0.012, 0.009)
-    # يجب أن يلغي الأوامر ويغلق الصفقة اضطرارياً
+    # يجب أن يلغي الأوامر (العادية + الشرطية) ويغلق الصفقة اضطرارياً
     assert ("cancel_open_orders", "BTCUSDT") in ex.client.calls
+    deletes = [c for c in _algo_calls(ex, "DELETE")]
+    assert deletes and deletes[0][3]["algoId"] == 555
     closes = [c for c in ex.client.calls if c[0] == "new_order" and c[4].get("reduceOnly") == "true"]
     assert closes, "لم يتم الإغلاق الاضطراري"
+
+
+def test_close_position_cancels_algo_orders():
+    """الأوامر الشرطية لا تُلغى مع cancel_open_orders — يجب حذفها صراحةً."""
+    ex = make_exchange()
+    ex.close_position("ETHUSDT")
+    paths = [(c[1], c[2]) for c in ex.client.calls if c[0] == "sign_request"]
+    assert ("GET", "/fapi/v1/openAlgoOrders") in paths
+    assert ("DELETE", "/fapi/v1/algoOrder") in paths
 
 
 def test_close_position_uses_reduce_only():
@@ -276,3 +355,27 @@ def test_invalid_side_raises():
     ex = make_exchange()
     with pytest.raises(ExchangeError):
         ex.open_market("BTCUSDT", "sideways", 60, 0.01, 0.01)
+
+
+def test_open_algo_orders_accepts_dict_and_list():
+    """Binance تُرجع {orders: [...]} أحياناً وقائمة أحياناً — نتعامل مع الاثنين."""
+    ex = make_exchange()
+    ex.client.sign_request = lambda m, p, payload=None, **k: {"orders": [{"algoId": 1}]}
+    assert ex.open_algo_orders("BTCUSDT") == [{"algoId": 1}]
+    ex.client.sign_request = lambda m, p, payload=None, **k: [{"algoId": 2}, {"algoId": 3}]
+    assert len(ex.open_algo_orders()) == 2
+
+
+def test_cancel_algo_orders_counts_cancellations():
+    ex = make_exchange()
+    assert ex.cancel_algo_orders("BTCUSDT") == 1
+    deletes = [c for c in _algo_calls(ex, "DELETE")]
+    assert deletes[0][3] == {"symbol": "BTCUSDT", "algoId": 555, "recvWindow": 10000}
+
+
+def test_cancel_algo_orders_survives_api_error():
+    ex = make_exchange()
+    ex.client.sign_request = lambda m, p, payload=None, **k: (_ for _ in ()).throw(
+        RuntimeError("network down")
+    )
+    assert ex.cancel_algo_orders("BTCUSDT") == 0

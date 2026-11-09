@@ -104,6 +104,7 @@ class TelegramBot:
         self.allowed = set(secrets.chat_ids or [])
         self.known: set[int] = set(secrets.chat_ids or [])
         self._scan_task = None          # حلقة فحص احتياطية عند غياب JobQueue
+        self._scan_lock = None          # يُنشأ داخل حلقة الأحداث
         self.app = (
             ApplicationBuilder()
             .token(secrets.telegram_token)
@@ -141,6 +142,7 @@ class TelegramBot:
             ("scan", self._scan),
             ("scanall", self._scan_all),
             ("data", self._data),
+            ("protect", self._protect),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -219,6 +221,9 @@ class TelegramBot:
             interval=max(30, int(self.cfg.get("scanner.interval_seconds", 120))),
             first=10,
             name="scanner",
+            # قفلنا الداخلي (self._scan_lock) يمنع تراكب دورتين فعلياً؛
+            # هذه الإعدادات تمنع تحذير apscheduler المزعج عند تجاوز مدة الفحص.
+            job_kwargs={"max_instances": 3, "coalesce": True, "misfire_grace_time": 60},
         )
         log.info("تم جدولة الفحص التلقائي كل %s ثانية",
                  self.cfg.get("scanner.interval_seconds", 120))
@@ -242,12 +247,22 @@ class TelegramBot:
                 log.exception("خطأ في حلقة الفحص الداخلية: %s", err)
                 await asyncio.sleep(30)
 
+    def _get_scan_lock(self):
+        if self._scan_lock is None:      # يُنشأ داخل حلقة الأحداث لتجنّب ربطه بحلقة أخرى
+            self._scan_lock = asyncio.Lock()
+        return self._scan_lock
+
     async def _run_scan_cycle(self) -> None:
-        try:
-            await self.trader.notify_expired()
-            await self.trader.scan_once()
-        except Exception as err:  # مهمة دورية يجب ألا تسقط البوت
-            log.exception("خطأ في مهمة الفحص: %s", err)
+        lock = self._get_scan_lock()
+        if lock.locked():
+            log.info("تخطّي دورة الفحص: الدورة السابقة لم تنتهِ بعد")
+            return
+        async with lock:
+            try:
+                await self.trader.notify_expired()
+                await self.trader.scan_once()
+            except Exception as err:  # مهمة دورية يجب ألا تسقط البوت
+                log.exception("خطأ في مهمة الفحص: %s", err)
 
     # ═══════════════════ الأوامر ═══════════════════
     async def _reply(self, update: Update, text: str, keyboard=None, **kwargs):
@@ -435,6 +450,67 @@ class TelegramBot:
             lines += ["", "ℹ️ الأسعار من السوق التجريبي لBinance، والأموال وهمية."]
         if age > 90:
             lines += ["", "⚠️ آخر شمعة قديمة — تحقّق من اتصال الإنترنت."]
+        await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    @restricted
+    async def _protect(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """يتحقق أن لكل صفقة مفتوحة وقف خسارة وجني أرباح مسجَّلين في المنصة."""
+        msg = await self._reply(update, "🛡 جارٍ فحص حماية الصفقات…")
+        exchange = self.trader.exchange
+
+        try:
+            positions = await self._to_thread(exchange.positions)
+        except Exception as err:
+            await msg.edit_text(f"❌ تعذّر جلب الصفقات:\n<code>{fmt.esc(str(err))}</code>",
+                                parse_mode=ParseMode.HTML)
+            return
+
+        algos: list = []
+        has_algo = callable(getattr(exchange, "open_algo_orders", None))
+        if has_algo:
+            try:
+                algos = await self._to_thread(exchange.open_algo_orders)
+            except Exception as err:
+                log.warning("تعذّر جلب الأوامر الشرطية: %s", err)
+
+        by_symbol: dict = {}
+        for order in algos:
+            if not isinstance(order, dict):
+                continue
+            otype = str(order.get("orderType") or order.get("type") or "")
+            by_symbol.setdefault(str(order.get("symbol")), set()).add(otype)
+
+        if not positions:
+            await msg.edit_text("📈 لا توجد صفقات مفتوحة — لا شيء لفحصه. ✅",
+                                parse_mode=ParseMode.HTML)
+            return
+
+        lines = ["🛡 <b>حماية الصفقات المفتوحة</b>", ""]
+        unprotected = 0
+        for pos in positions:
+            types = by_symbol.get(pos.symbol, set())
+            has_sl = bool(types & {"STOP_MARKET", "STOP"})
+            has_tp = bool(types & {"TAKE_PROFIT_MARKET", "TAKE_PROFIT"})
+            if not has_sl:
+                unprotected += 1
+            lines += [
+                f"{'🟢' if pos.side == 'buy' else '🔴'} <code>{fmt.esc(pos.symbol)}</code> "
+                f"×{pos.leverage:g}",
+                f"   وقف الخسارة: {'✅' if has_sl else '❌ <b>غير موجود</b>'}"
+                f" | جني الأرباح: {'✅' if has_tp else '—'}",
+            ]
+
+        lines += [""]
+        if unprotected:
+            lines += [
+                f"❌ <b>{unprotected} صفقة بلا وقف خسارة!</b>",
+                "أغلقها يدوياً من المنصة، أو أرسل /closeall.",
+            ]
+        else:
+            lines += ["✅ كل صفقة مفتوحة عليها وقف خسارة مسجَّل في المنصة."]
+        if has_algo:
+            lines += ["", f"<i>الأوامر الشرطية المفتوحة: {len(algos)} "
+                          "(تُقرأ من نقطة Algo /fapi/v1/openAlgoOrders)</i>"]
         await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     @restricted
