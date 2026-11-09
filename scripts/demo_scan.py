@@ -3,7 +3,8 @@
 يشغّل دورة فحص واحدة على بيانات اصطناعية ويطبع الرسائل التي
 سيرسلها البوت إلى تليجرام بالضبط:
 
-    .venv/bin/python scripts/demo_scan.py
+    .venv\Scripts\python.exe scripts\demo_scan.py     (ويندوز)
+    .venv/bin/python scripts/demo_scan.py             (لينكس/ماك)
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from stratig.config import Config  # noqa: E402
+from stratig.data import from_lists  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
     ExchangeBase,
@@ -26,11 +28,10 @@ from stratig.services.notifier import Notifier  # noqa: E402
 from stratig.services.trader import Trader  # noqa: E402
 
 
-def synthetic(sign: int, seed: float = 1000.0) -> "object":
-    """سلسلة سعرية: هبوط ثم ارتداد (أو العكس)."""
-    import pandas as pd
-
-    closes, price = [], seed
+def synthetic(sign: int, seed: float = 1000.0):
+    """سلسلة سعرية: هبوط طويل + انحدار حاد + استقرار + ارتداد."""
+    closes: list[float] = []
+    price = seed
     for _ in range(100):
         price -= 1.0 * sign
         closes.append(price)
@@ -43,17 +44,9 @@ def synthetic(sign: int, seed: float = 1000.0) -> "object":
     price += 15.0 * sign
     closes.append(price)
 
-    close = pd.Series(closes)
-    return pd.DataFrame(
-        {
-            "Open": close,
-            "High": close + close.abs() * 0.001,
-            "Low": close - close.abs() * 0.001,
-            "Close": close,
-            "Volume": 1.0,
-            "Turnover": 1.0,
-        }
-    )
+    highs = [c + abs(c) * 0.001 for c in closes]
+    lows = [c - abs(c) * 0.001 for c in closes]
+    return from_lists(closes, highs, lows)
 
 
 class DemoExchange(ExchangeBase):
@@ -64,22 +57,17 @@ class DemoExchange(ExchangeBase):
 
     def __init__(self):
         self.symbols = ["BULLUSDT", "BEARUSDT", "FLATUSDT"]
-        import pandas as pd
-
-        self.data = {"BULLUSDT": synthetic(1), "BEARUSDT": synthetic(-1)}
-        flat = pd.Series([100.0] * 200)
-        self.data["FLATUSDT"] = pd.DataFrame(
-            {
-                "Open": flat, "High": flat + 1, "Low": flat - 1,
-                "Close": flat, "Volume": 1.0, "Turnover": 1.0,
-            }
-        )
+        self.data = {
+            "BULLUSDT": synthetic(1),        # نمط قاع → إشارة شراء
+            "BEARUSDT": synthetic(-1),       # نمط قمة → إشارة بيع
+            "FLATUSDT": from_lists([100.0] * 200),   # سوق جانبي → لا إشارة
+        }
 
     def klines(self, symbol, interval="15m", limit=500):
         return self.data[symbol]
 
     def mark_price(self, symbol):
-        return float(self.data[symbol]["Close"].iloc[-1])
+        return float(self.data[symbol].close[-1])
 
     def symbol_info(self, symbol):
         return SymbolInfo(symbol, 2, 3, 0.01, 0.001, 0.001, 20)
@@ -100,10 +88,12 @@ class DemoExchange(ExchangeBase):
                     margin_mode="isolated", tp_trigger="mark_price", min_notional=0.0):
         price = self.mark_price(symbol)
         print(f"   ↳ [منصة وهمية] أمر {side} على {symbol}: {qty_usdt} USDT @ {price:.2f}")
-        return OrderResult(symbol, side, qty_usdt / price, price,
-                           tp_price=price * (1 + tp_pct) if side == "buy" else price * (1 - tp_pct),
-                           sl_price=price * (1 - sl_pct) if side == "buy" else price * (1 + sl_pct),
-                           notional=qty_usdt, simulated=True)
+        return OrderResult(
+            symbol, side, qty_usdt / price, price,
+            tp_price=price * (1 + tp_pct) if side == "buy" else price * (1 - tp_pct),
+            sl_price=price * (1 - sl_pct) if side == "buy" else price * (1 + sl_pct),
+            notional=qty_usdt, simulated=True,
+        )
 
     def close_position(self, symbol):
         return None

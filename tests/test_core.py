@@ -6,12 +6,12 @@ import sys
 import time
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.config import Config, Secrets  # noqa: E402
+from stratig.data import make_candles  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
     ExchangeBase,
@@ -20,12 +20,11 @@ from stratig.exchanges.base import (  # noqa: E402
     SymbolInfo,
     fmt_num,
     interval_to_minutes,
-    make_klines,
     normalize_interval,
     round_step,
 )
 from stratig.services.trader import STATUS_EXPIRED, STATUS_OPENED, STATUS_SKIPPED, Trader  # noqa: E402
-from tests.test_strategy import make_df  # noqa: E402
+from tests.test_strategy import make_candles as make_signal_candles  # noqa: E402
 
 
 # ═══════════════════════ أدوات ═══════════════════════
@@ -48,16 +47,32 @@ def test_fmt_num():
 
 
 def test_make_klines_order():
-    # Bybit: الأحدث أولاً → نعكس
     # Bybit: الأحدث أولاً (300 ثم 200 ثم 100) → نعكس ليصبح الأخير هو الأحدث
     newest_first = [[300, "3", "3", "3", "3", "1", "1"],
                     [200, "2", "2", "2", "2", "1", "1"],
                     [100, "1", "1", "1", "1", "1", "1"]]
-    df = make_klines(newest_first, reverse=True)
-    assert list(df["Close"]) == [1.0, 2.0, 3.0]
+    candles = make_candles(newest_first, reverse=True)
+    assert candles.close == [1.0, 2.0, 3.0]
     # Binance: الأقدم أولاً → بدون عكس
-    df2 = make_klines(list(reversed(newest_first)), reverse=False)
-    assert list(df2["Close"]) == [1.0, 2.0, 3.0]
+    candles2 = make_candles(list(reversed(newest_first)), reverse=False)
+    assert candles2.close == [1.0, 2.0, 3.0]
+    assert candles2.times[0] < candles2.times[-1]
+
+
+def test_make_candles_handles_empty_and_short_rows():
+    assert len(make_candles([])) == 0
+    full = make_candles([[1000, "10", "11", "9", "10.5", "100", "1000"]])
+    assert full.times == [1000.0]
+    assert full.open == [10.0]
+    assert full.high == [11.0]
+    assert full.low == [9.0]
+    assert full.close == [10.5]
+    assert full.volume == [100.0]
+    assert full.turnover == [1000.0]
+    # صف ناقص الأعمدة: تُستكمل بأصفار بدل الانهيار
+    short = make_candles([[1, "10", "11", "9"]])
+    assert short.open == [10.0]
+    assert short.close == [0.0]
 
 
 # ═══════════════════════ الإعدادات ═══════════════════════
@@ -108,7 +123,7 @@ class FakeExchange(ExchangeBase):
         self.name = "fake-testnet"
         self.testnet = True
         self.symbols = list(symbols)
-        self.df = df if df is not None else make_df(sign=1)
+        self.df = df if df is not None else make_signal_candles(sign=1)
         self._positions = list(positions or [])
         self.calls: list[tuple] = []
         self.closed: list[str] = []
@@ -121,7 +136,7 @@ class FakeExchange(ExchangeBase):
         return self.df
 
     def mark_price(self, symbol):
-        return float(self.df["Close"].iloc[-1])
+        return float(self.df.close[-1])
 
     def symbol_info(self, symbol):
         return SymbolInfo(symbol, price_precision=2, qty_precision=3,

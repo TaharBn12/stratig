@@ -12,8 +12,7 @@ import logging
 import time
 from typing import Any
 
-import pandas as pd
-
+from ..data import Candles, make_candles
 from .base import (
     BUY,
     SELL,
@@ -24,7 +23,6 @@ from .base import (
     Position,
     SymbolInfo,
     fmt_num,
-    make_klines,
     normalize_interval,
     round_step,
 )
@@ -142,11 +140,11 @@ class BinanceFutures(ExchangeBase):
         out = [s for s in ordered if s not in blocked]
         return out[:top_n] if top_n and top_n > 0 else out
 
-    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> pd.DataFrame:
+    def klines(self, symbol: str, interval: str = "15m", limit: int = 500) -> Candles:
         raw = self.client.klines(
             symbol=symbol, interval=normalize_interval(interval), limit=int(limit), **self._rw()
         )
-        return make_klines(raw, reverse=False)
+        return make_candles(raw, reverse=False)   # Binance: الأقدم أولاً
 
     def mark_price(self, symbol: str) -> float:
         try:

@@ -1,8 +1,11 @@
-# Stratig — تبعيات خفيفة بدون أي مكتبة تحتاج مصنّف C/C++ على ويندوز
+# Stratig — تبعيات بايثون خالصة 100% (بدون أي مكتبة مترجَمة C/C++)
 #
-# ملاحظة: المؤشرات (RSI / Williams %R / EMA) محسوبة داخلياً بـ pandas،
-#         والإعدادات بصيغة TOML (مكتبة tomllib القياسية) — لذلك لا نحتاج
-#         لا `ta` ولا `PyYAML`، ويعمل التثبيت على أي نسخة بايثون حديثة.
+# لا يوجد numpy ولا pandas ولا ta ولا PyYAML:
+#   - الإعدادات: config.toml عبر tomllib من المكتبة القياسية
+#   - المؤشرات (RSI / Williams %R / EMA): محسوبة داخلياً ببايثون
+#   - الشموع: حاوية list بسيطة (stratig/data.py)
+# لذلك يعمل التثبيت على أي نسخة بايثون حديثة وعلى أي ويندوز،
+# دون الحاجة إلى Microsoft C++ Build Tools.
 
 # --- Telegram ---
 python-telegram-bot>=22.0,<23
@@ -10,10 +13,6 @@ python-telegram-bot>=22.0,<23
 # --- Exchanges ---
 binance-futures-connector>=4.0      # Binance USDT-M Futures (يدعم التيستنت)
 pybit>=5.6                          # Bybit (اختياري)
-
-# --- Data ---
-pandas>=2.0
-numpy>=1.24
 
 # --- Misc ---
 python-dotenv>=1.0

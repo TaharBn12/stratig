@@ -4,8 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-import pandas as pd
-
+from ..data import Candles, NAN
 from .indicators import BUY, SELL, IndicatorResult, rsi_signal, williams_r_signal
 
 
@@ -13,7 +12,7 @@ from .indicators import BUY, SELL, IndicatorResult, rsi_signal, williams_r_signa
 class Decision:
     symbol: str
     side: Optional[str] = None        # buy | sell | None
-    price: float = 0.0
+    price: float = NAN
     timeframe: str = ""
     rsi: Optional[IndicatorResult] = None
     willr: Optional[IndicatorResult] = None
@@ -43,29 +42,31 @@ class Decision:
         return "\n".join(lines)
 
 
-def evaluate(df: pd.DataFrame, cfg, symbol: str = "", use_closed_candles: bool = True) -> Decision:
+def evaluate(
+    candles: Candles, cfg, symbol: str = "", use_closed_candles: bool = True
+) -> Decision:
     """يحسب الإشارة لرمز واحد.
 
-    df: شموع مرتبة بحيث آخر صف = أحدث شمعة
+    candles: شموع مرتّبة بحيث آخر عنصر = أحدث شمعة
     cfg: كائن Config
     """
     timeframe = str(cfg.get("strategy.timeframe", "15m"))
     require_both = bool(cfg.get("strategy.require_both", True))
     decision = Decision(symbol=symbol, timeframe=timeframe, requires_both=require_both)
 
-    if df is None or df.empty:
+    if candles is None or len(candles) == 0:
         decision.notes.append("لا توجد شموع")
         return decision
 
-    data = df.iloc[:-1] if (use_closed_candles and len(df) > 2) else df
+    data = candles.without_last() if (use_closed_candles and len(candles) > 2) else candles
     if len(data) < 60:
         decision.notes.append("عدد الشموع قليل")
         return decision
 
-    close = data["Close"].astype(float)
-    high = data["High"].astype(float)
-    low = data["Low"].astype(float)
-    decision.price = float(close.iloc[-1])
+    close = list(data.close)
+    high = list(data.high)
+    low = list(data.low)
+    decision.price = data.last_close
 
     rsi_cfg = cfg.get("strategy.rsi", {}) or {}
     wr_cfg = cfg.get("strategy.williams_r", {}) or {}
