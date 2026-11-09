@@ -160,6 +160,10 @@ class FakeExchange(ExchangeBase):
                     margin_mode="isolated", tp_trigger="mark_price", min_notional=0.0):
         self.calls.append((symbol, side, qty_usdt, tp_pct, sl_pct, leverage, margin_mode))
         price = self.mark_price(symbol)
+        if self.dry_run:                      # محاكاة: لا صفقة ولا أمر
+            return OrderResult(symbol=symbol, side=side, qty=qty_usdt / price, price=price,
+                               tp_price=price * (1 + tp_pct), sl_price=price * (1 - sl_pct),
+                               notional=qty_usdt, simulated=True)
         self._positions.append(Position(symbol=symbol, side=side, size=qty_usdt / price,
                                         entry_price=price, mark_price=price))
         return OrderResult(symbol=symbol, side=side, qty=qty_usdt / price, price=price,
@@ -403,3 +407,36 @@ def test_scan_records_source(tmp_path):
     ex.symbols = ["AAAUSDT", "BBBUSDT"]
     asyncio.run(trader.scan_once(manual=True, all_symbols=True))
     assert trader.last_scan_source == "all"
+
+
+def test_signal_text_shows_real_execution_when_dry_run_off(tmp_path):
+    """رسالة الإشارة يجب أن تقول صراحةً أن الأمر سيُرسل فعلياً."""
+    trader, ex = make_trader(tmp_path)
+    sig = asyncio.run(trader.scan_once())[0]
+    text = trader._signal_text(sig)
+    assert "محاكاة" not in text
+    assert "أمر حقيقي" in text and ex.name in text
+
+
+def test_signal_text_warns_when_dry_run_on(tmp_path):
+    trader, ex = make_trader(tmp_path, safety__dry_run=True)
+    sig = asyncio.run(trader.scan_once())[0]
+    assert "محاكاة" in trader._signal_text(sig)
+
+
+def test_opened_text_confirms_real_order(tmp_path):
+    """بعد الفتح: 'أُمر حقيقي أُرسل' بدل 'محاكاة'."""
+    trader, ex = make_trader(tmp_path)
+    sig = asyncio.run(trader.scan_once())[0]
+    asyncio.run(trader.open_signal(sig.id))
+    text = trader._opened_text(sig)
+    assert "محاكاة" not in text
+    assert "أُمر حقيقي أُرسل" in text
+
+
+def test_opened_text_marks_simulation(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    ex.dry_run = True
+    sig = asyncio.run(trader.scan_once())[0]
+    asyncio.run(trader.open_signal(sig.id))
+    assert "محاكاة" in trader._opened_text(sig)

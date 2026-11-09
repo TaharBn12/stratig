@@ -84,8 +84,18 @@ def main(argv: list[str] | None = None) -> int:
 
     config = Config.load(args.config, args.env)
     secrets = Secrets.from_env(args.env)
+
+    # من أين جاءت قيمة المحاكاة؟ (مهم لتشخيص «لماذا لا تُنفَّذ أوامري؟»)
+    file_dry = bool(config.get("safety.dry_run", False))
+    env_dry = os.getenv("DRY_RUN")
     if args.dry_run:
+        source = "عامر --dry-run"
         config.set("safety.dry_run", True)
+    elif env_dry is not None:
+        source = f"متغير البيئة DRY_RUN={env_dry}"
+    else:
+        source = f"ملف الإعدادات ({args.config}: safety.dry_run = {file_dry})"
+
     setup_logging(args.log_level)
 
     if args.check:
@@ -112,9 +122,16 @@ def main(argv: list[str] | None = None) -> int:
 
     trader = Trader(config, exchange)
     bot = TelegramBot(secrets, config, trader)
-    log.info("الإعدادات: %s | الوضع: %s | المحاكاة: %s",
+    log.info("الإعدادات: %s | الوضع: %s | المحاكاة: %s (المصدر: %s)",
              config.get("exchange.name"), config.get("execution.mode"),
-             config.get("safety.dry_run"))
+             config.get("safety.dry_run"), source)
+    if bool(config.get("safety.dry_run", False)):
+        log.warning(
+            "وضع المحاكاة مُفعّل: لن تُرسل أي أوامر إلى المنصة. "
+            "للتنفيذ الحقيقي أرسل /live للبوت، أو /set dryrun false"
+        )
+    elif bool(config.get("exchange.testnet", True)):
+        log.info("تعمل على التيستنت: الأوامر حقيقية على محرك Binance التجريبي والأموال وهمية.")
     bot.run()
     return 0
 

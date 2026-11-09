@@ -118,6 +118,8 @@ class ExchangeBase(ABC):
 
     name: str = "base"
     testnet: bool = True
+    # محاكاة: تحليل حقيقي بلا إرسال أي أمر — يُبدَّل فوراً بأمر /live
+    dry_run: bool = False
 
     # ---------- بيانات السوق ----------
     @abstractmethod

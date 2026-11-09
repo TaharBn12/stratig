@@ -206,3 +206,53 @@ def test_protect_reports_no_positions():
 
     asyncio.run(bot._protect.__wrapped__(bot, Update(), None))
     assert edits and "لا توجد صفقات" in edits[0]
+
+
+# ═══════════════════════ المحاكاة مقابل التنفيذ الحقيقي ═══════════════════════
+def make_bot_with_config(tmp_path, dry: bool = True):
+    cfg = Config({}, path=tmp_path / "config.toml")
+    cfg.set("scanner.symbols_source", "manual")
+    cfg.set("scanner.manual_symbols", ["AAAUSDT"])
+    cfg.set("safety.dry_run", dry)
+    exchange = FakeExchange(symbols=("AAAUSDT",), df=make_candles(sign=1))
+    exchange.dry_run = dry
+    trader = Trader(cfg, exchange)
+    bot = TelegramBot(Secrets(telegram_token="123:FAKE", chat_ids=[1]), cfg, trader)
+    return bot, trader, exchange
+
+
+def test_live_disables_simulation_immediately(tmp_path):
+    """/live يجب أن يوقف المحاكاة فوراً على كائن المنصة بدون إعادة تشغيل."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=True)
+    assert exchange.dry_run is True
+
+    text = bot._toggle_dry_run(False)
+
+    assert bot.cfg.get("safety.dry_run") is False
+    assert exchange.dry_run is False            # الأهم: يُطبَّق فوراً
+    assert "التنفيذ الحقيقي" in text
+    assert (tmp_path / "config.toml").exists()  # وحُفظ في الملف
+
+
+def test_dryrun_enables_simulation(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    text = bot._toggle_dry_run(True)
+    assert bot.cfg.get("safety.dry_run") is True
+    assert exchange.dry_run is True
+    assert "محاكاة" in text
+
+
+def test_set_dryrun_false_applies_to_exchange(tmp_path):
+    """/set dryrun false كان يحفظ الإعداد دون تطبيقه على الجلسة — عُولج."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=True)
+    ok, message = bot._apply_setting("dryrun", "false")
+    assert ok is True
+    assert exchange.dry_run is False
+    assert "حقيقية" in message
+
+
+def test_startup_text_states_execution_mode(tmp_path):
+    bot, _, _ = make_bot_with_config(tmp_path, dry=True)
+    assert "محاكاة" in bot._startup_text()
+    bot.cfg.set("safety.dry_run", False)
+    assert "أوامر حقيقية" in bot._startup_text()

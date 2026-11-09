@@ -38,13 +38,17 @@ def status_text(st: dict) -> str:
     state = "🟢 يعمل" if st["running"] else "⏸ موقوف"
     mode_ar = "تلقائي (بدون تأكيد)" if st["mode"] == "auto" else "يدوي (بتأكيدك)"
     net = "تيستنت 🧪" if st["testnet"] else "حقيقي 🔴"
+    if st["dry_run"]:
+        exec_line = "مُفعّلة 🧪 — <b>لا تُرسل أي أوامر</b> (للتنفيذ الحقيقي: /live)"
+    else:
+        exec_line = "معطّلة — الأوامر تُرسل إلى المنصة فعلياً 🔴"
     lines = [
         "📊 <b>حالة البوت</b>",
         "",
         f"الحالة: {state}",
         f"المنصة: <code>{esc(st['exchange'])}</code> — {net}",
         f"وضع التنفيذ: {mode_ar}",
-        f"المحاكاة: {'مفعّلة 🧪' if st['dry_run'] else 'معطّلة'}",
+        f"المحاكاة: {exec_line}",
         "",
         f"آخر فحص: {ago(st['last_scan'])} ({st['last_scan_duration']:.1f} ث)",
         f"الرموز المفحوصة: {st['symbols']} ({esc(source_ar(st.get('source', '—')))})",
@@ -144,6 +148,8 @@ def help_text() -> str:
             "⏸ /pause  ▶️ /resume — إيقاف/تشغيل الفحص التلقائي",
             "🔎 /data — تحقق من مصدر البيانات (حقيقي أم محاكاة)",
             "🛡 /protect — هل كل صفقة عليها وقف خسارة حقيقي؟",
+            "🔴 /live — تفعيل التنفيذ الحقيقي (الأوامر تُرسل للمنصة)",
+            "🧪 /dryrun — وضع المحاكاة (تحليل بلا أوامر)",
             "🔒 /close BTCUSDT — إغلاق صفقة",
             "🔒 /closeall — إغلاق كل الصفقات",
             "🆔 /id — معرف محادثتك",

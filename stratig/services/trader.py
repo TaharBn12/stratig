@@ -345,6 +345,8 @@ class Trader:
         ]
         if bool(self.cfg.get("safety.dry_run", False)):
             lines.append("\n🧪 وضع المحاكاة مفعّل — لن تُرسل أوامر حقيقية")
+        else:
+            lines.append(f"\n🔴 عند التأكيد يُرسل أمر حقيقي إلى {_esc(self.exchange.name)}")
         return "\n".join(lines)
 
     def _signal_buttons(self, sig: PendingSignal):
@@ -410,7 +412,8 @@ class Trader:
     def _opened_text(self, sig: PendingSignal) -> str:
         r = sig.result
         side_ar = "شراء 🟢" if sig.side == BUY else "بيع 🔴"
-        sim = "\n🧪 <i>محاكاة — لم تُرسل أمراً حقيقياً</i>" if (r and r.simulated) else ""
+        tag = ("\n🧪 <i>محاكاة — لم تُرسل أمراً حقيقياً</i>" if (r and r.simulated)
+               else f"\n🔴 <i>أُمر حقيقي أُرسل إلى {_esc(self.exchange.name)}</i>")
         if not r:
             return f"❌ لا توجد نتيجة لـ {_esc(sig.symbol)}"
         lines = [
@@ -428,7 +431,7 @@ class Trader:
             lines.append(f"🛑 وقف الخسارة: <code>{_num(r.sl_price)}</code>")
         if r.order_id:
             lines.append(f"رقم الأمر: <code>{_esc(str(r.order_id))}</code>")
-        lines.append(sim)
+        lines.append(tag)
         return "\n".join(lines)
 
     def _manage_buttons(self, symbol: str):
