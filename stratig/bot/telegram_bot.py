@@ -102,6 +102,7 @@ class TelegramBot:
         self.trader = trader
         self.allowed = set(secrets.chat_ids or [])
         self.known: set[int] = set(secrets.chat_ids or [])
+        self._scan_task = None          # حلقة فحص احتياطية عند غياب JobQueue
         self.app = (
             ApplicationBuilder()
             .token(secrets.telegram_token)
@@ -174,6 +175,9 @@ class TelegramBot:
                  "تيستنت" if self.trader.exchange.testnet else "حقيقي")
 
     async def _post_stop(self, app) -> None:  # pragma: no cover
+        if self._scan_task and not self._scan_task.done():
+            self._scan_task.cancel()
+            self._scan_task = None
         log.info("تم إيقاف البوت")
 
     def _startup_text(self) -> str:
@@ -197,7 +201,15 @@ class TelegramBot:
     def _schedule_scan(self) -> None:
         jq = self.app.job_queue
         if jq is None:
+            # لا توجد JobQueue (لم تُثبّت apscheduler) → نستخدم حلقة داخلية
+            log.warning(
+                "JobQueue غير متاحة — سيتم استخدام حلقة فحص داخلية. "
+                "للميزة الكاملة ثبّت: pip install \"python-telegram-bot[job-queue]\""
+            )
+            if self._scan_task is None or self._scan_task.done():
+                self._scan_task = asyncio.create_task(self._scan_loop())
             return
+
         for job in jq.get_jobs_by_name("scanner"):
             job.schedule_removal()
         jq.run_repeating(
@@ -206,8 +218,29 @@ class TelegramBot:
             first=10,
             name="scanner",
         )
+        log.info("تم جدولة الفحص التلقائي كل %s ثانية",
+                 self.cfg.get("scanner.interval_seconds", 120))
 
     async def _scan_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._run_scan_cycle()
+
+    async def _scan_loop(self) -> None:
+        """بديل عن JobQueue: حلقة فحص داخلية تعمل في الخلفية."""
+        log.info("تم تشغيل حلقة الفحص الداخلية")
+        while True:
+            try:
+                interval = max(30, int(self.cfg.get("scanner.interval_seconds", 120)))
+                await asyncio.sleep(interval)
+                if not self.trader.running:
+                    continue
+                await self._run_scan_cycle()
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # الحلقة يجب ألا تسقط البوت أبداً
+                log.exception("خطأ في حلقة الفحص الداخلية: %s", err)
+                await asyncio.sleep(30)
+
+    async def _run_scan_cycle(self) -> None:
         try:
             await self.trader.notify_expired()
             await self.trader.scan_once()
