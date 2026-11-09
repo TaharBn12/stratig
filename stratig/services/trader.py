@@ -56,6 +56,8 @@ class Trader:
 
         self.pending: dict[str, PendingSignal] = {}
         self.cooldown: dict[str, float] = {}
+        self.scan_failures: int = 0          # عدد الرموز التي فشل جلب شموعها في آخر فحص
+        self._total_failure_notified: bool = False
         self.running: bool = bool(config.get("scanner.autostart", True))
 
         self.last_scan_source: str = ""      # auto | manual | all
@@ -122,6 +124,17 @@ class Trader:
         self.cfg.set("scanner.manual_symbols", clean)
         self.cfg.set("scanner.symbols_source", "manual")
         self.cfg.save()
+
+    def reset_cooldowns(self) -> int:
+        """يمسح فترة السمومية لكل الرموز (مفيد بعد تغيير الإطار الزمني)."""
+        count = len(self.cooldown)
+        self.cooldown.clear()
+        return count
+
+    def on_timeframe_changed(self) -> int:
+        """بعد تغيير الإطار الزمني: يمسح السمومية ليُقيَّم السوق فوراً."""
+        self._total_failure_notified = False
+        return self.reset_cooldowns()
 
     def invalidate_symbols(self) -> None:
         """يمسح الذاكرة المؤقتة للرموز (يُجبر التحديث في الفحص القادم)."""
@@ -243,6 +256,7 @@ class Trader:
 
                 # نعدّ الصفقات محلياً (بدل طلبها من المنصة عند كل رمز — يضاعف الطلبات)
                 open_count = len(positions)
+                self.scan_failures = 0
                 for symbol in symbols:
                     if open_count >= max_pos:
                         break
@@ -256,6 +270,10 @@ class Trader:
                             break
                     if delay:
                         await asyncio.sleep(delay)
+
+                if symbols and self.scan_failures >= len(symbols):
+                    # فشل كل الرموز = غالباً إطار زمني مرفوض من المنصة
+                    await self._report_total_failure(len(symbols))
 
                 self.stats["scans"] += 1
                 self.last_scan_at = time.time()
@@ -275,6 +293,20 @@ class Trader:
             await self.notifier.send("🔍 لا توجد إشارات حالياً.")
         return found
 
+    async def _report_total_failure(self, count: int) -> None:
+        """"فشل جلب الشموع لكل الرموز" — السبب الغالب: إطار زمني ترفضه المنصة."""
+        timeframe = str(self.cfg.get("strategy.timeframe", "15m"))
+        message = (
+            f"❌ تعذّر جلب الشموع لكل الرموز ({count}) على الإطار "
+            f"<code>{_esc(timeframe)}</code>.\n"
+            "السبب الغالب: إطار زمني لا تقبله المنصة.\n"
+            "أرسل <code>/set tf 15m</code> أو <code>/set tf 5m</code>."
+        )
+        log.error("فشل جلب الشموع لكل الرموز على الإطار %s", timeframe)
+        if not self._total_failure_notified and self.notifier is not None:
+            self._total_failure_notified = True
+            await self.notifier.send(message)
+
     async def _evaluate_symbol(self, symbol: str, open_positions: set) -> Optional[PendingSignal]:
         if symbol in open_positions:
             return None
@@ -291,6 +323,7 @@ class Trader:
             df = await asyncio.to_thread(self.exchange.klines, symbol, timeframe, limit)
             decision = evaluate(df, self.cfg, symbol=symbol, use_closed_candles=use_closed)
         except Exception as err:
+            self.scan_failures += 1
             log.debug("[%s] تعذّر الحساب: %s", symbol, err)
             return None
 
@@ -509,6 +542,7 @@ class Trader:
             "exchange": self.exchange.name,
             "testnet": self.exchange.testnet,
             "dry_run": bool(self.cfg.get("safety.dry_run", False)),
+            "timeframe": str(self.cfg.get("strategy.timeframe", "15m")),
             "last_scan": self.last_scan_at,
             "source": self.last_scan_source or self.symbols_source,
             "last_scan_duration": self.last_scan_duration,

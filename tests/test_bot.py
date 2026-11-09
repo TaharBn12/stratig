@@ -256,3 +256,93 @@ def test_startup_text_states_execution_mode(tmp_path):
     assert "محاكاة" in bot._startup_text()
     bot.cfg.set("safety.dry_run", False)
     assert "أوامر حقيقية" in bot._startup_text()
+
+
+# ═══════════════════════ الإطار الزمني ═══════════════════════
+def test_set_tf_normalizes_aliases(tmp_path):
+    """/set tf 5min يجب أن يُفهم كـ 5m."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, message = bot._apply_setting("tf", "5min")
+    assert ok is True
+    assert bot.cfg.get("strategy.timeframe") == "5m"
+    assert "5m" in message
+
+
+def test_set_tf_accepts_bare_number(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, _ = bot._apply_setting("tf", "15")
+    assert ok is True
+    assert bot.cfg.get("strategy.timeframe") == "15m"
+
+
+def test_set_tf_rejects_unsupported(tmp_path):
+    """إطار مرفوض يجب أن يُرفض فوراً برسالة واضحة بدل صمت المنصة."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, message = bot._apply_setting("tf", "7m")
+    assert ok is False
+    assert "غير مدعوم" in message
+    assert bot.cfg.get("strategy.timeframe") != "7m"
+
+
+def test_set_tf_clears_cooldown_so_new_tf_applies(tmp_path):
+    """السمومية كانت تخفي أثر تغيير الإطار لمدة 30 دقيقة."""
+    import time as _time
+
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    trader.cooldown["AAAUSDT"] = _time.time() + 1800
+    ok, message = bot._apply_setting("tf", "5m")
+    assert ok is True
+    assert trader.cooldown == {}
+    assert "السمومية" in message
+
+
+def test_scan_uses_current_timeframe(tmp_path):
+    """الفحص يقرأ الإطار من الإعدادات عند كل رمز (لا يُخزَّن عند الإقلاع)."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    seen: list[str] = []
+    exchange.klines = lambda symbol, interval="15m", limit=500: (seen.append(interval), exchange.df)[1]
+    bot.cfg.set("strategy.timeframe", "1h")
+    asyncio.run(trader.scan_once())
+    assert seen and seen[0] == "1h"
+
+
+def test_reload_picks_up_manual_file_edit(tmp_path):
+    """تعديل config.toml يدوياً يجب أن يظهر بـ /reload أو تلقائياً."""
+    cfg = Config({"strategy": {"timeframe": "15m"}}, path=tmp_path / "config.toml")
+    cfg.save()
+    assert cfg.reload() is False                 # لا تغيير بعد
+
+    text = (tmp_path / "config.toml").read_text(encoding="utf-8").replace("15m", "5m")
+    (tmp_path / "config.toml").write_text(text, encoding="utf-8")
+    import os
+    os.utime(tmp_path / "config.toml", (9_000_000_000, 9_000_000_000))
+
+    assert cfg.reload() is True
+    assert cfg.get("strategy.timeframe") == "5m"
+
+
+def test_reload_keeps_pinned_values(tmp_path):
+    """--dry-run يجب ألا يُلغى بإعادة تحميل الملف."""
+    cfg = Config({"safety": {"dry_run": False}}, path=tmp_path / "config.toml")
+    cfg.save()
+    cfg.pin("safety.dry_run", True)
+    text = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    (tmp_path / "config.toml").write_text(text + "\n", encoding="utf-8")
+    import os
+    os.utime(tmp_path / "config.toml", (9_000_000_001, 9_000_000_001))
+    assert cfg.reload() is True
+    assert cfg.get("safety.dry_run") is True
+
+
+def test_scan_cycle_reloads_config_automatically(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    bot.cfg.save()
+    (tmp_path / "config.toml").write_text(
+        (tmp_path / "config.toml").read_text(encoding="utf-8")
+        .replace('timeframe = "15m"', 'timeframe = "5m"'),
+        encoding="utf-8",
+    )
+    import os
+    os.utime(tmp_path / "config.toml", (9_000_000_002, 9_000_000_002))
+    asyncio.run(bot._run_scan_cycle())
+    assert bot.cfg.get("strategy.timeframe") == "5m"

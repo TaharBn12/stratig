@@ -5,12 +5,15 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
 
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
 
 try:  # بايثون 3.11+
     import tomllib
@@ -131,6 +134,9 @@ class Config:
     def __init__(self, data: dict[str, Any] | None = None, path: Path | None = None):
         self._data = deep_merge(DEFAULT_CONFIG, data or {})
         self.path = Path(path) if path else DEFAULT_CONFIG_PATH
+        self._mtime: float | None = None
+        # قيم م ثبَّتة من سطر الأوامر (مثل --dry-run) — لا يطغى عليها إعادة التحميل
+        self._pinned: dict[str, Any] = {}
 
     # ---------- تحميل / حفظ ----------
     @classmethod
@@ -146,6 +152,10 @@ class Config:
             data = cls._read_file(cfg_path)
         cfg = cls(data, cfg_path)
         cfg._apply_env_overrides()
+        try:
+            cfg._mtime = cfg_path.stat().st_mtime if cfg_path.exists() else None
+        except OSError:  # pragma: no cover
+            cfg._mtime = None
         return cfg
 
     @staticmethod
@@ -181,9 +191,45 @@ class Config:
         if dry is not None:
             self.set("safety.dry_run", dry.strip().lower() in ("1", "true", "yes", "on"))
 
+    def pin(self, path: str, value: Any) -> None:
+        """يثبّت قيمة من سطر الأوامر بحيث تبقى حتى بعد إعادة تحميل الملف."""
+        self._pinned[path] = value
+        self.set(path, value)
+
+    def reload(self) -> bool:
+        """يعيد قراءة الملف من القرص — يلتقط التعديلات اليدوية أثناء عمل البوت.
+
+        يُرجع True إن تغيّر الملف فعلاً. لا يطغى على القيم المثبَّتة (--dry-run)
+        ولا على متغيرات البيئة.
+        """
+        try:
+            mtime = self.path.stat().st_mtime
+        except OSError:
+            return False
+        if self._mtime is not None and mtime == self._mtime:
+            return False
+
+        data: dict[str, Any] = {}
+        if self.path.exists():
+            try:
+                data = self._read_file(self.path)
+            except Exception as err:  # ملف نصف مكتوب → نتجاهل هذه الدورة
+                log.warning("تعذّر قراءة %s: %s", self.path, err)
+                return False
+        self._data = deep_merge(DEFAULT_CONFIG, data)
+        self._apply_env_overrides()
+        for path, value in self._pinned.items():
+            self.set(path, value)
+        self._mtime = mtime
+        return True
+
     def save(self) -> None:
         with open(self.path, "w", encoding="utf-8") as fh:
             fh.write(toml_dumps(self._data))
+        try:
+            self._mtime = self.path.stat().st_mtime   # لا نُعيد تحميل ما كتبناه للتو
+        except OSError:  # pragma: no cover
+            pass
 
     # ---------- وصول ----------
     def get(self, path: str, default: Any = None) -> Any:

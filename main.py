@@ -14,6 +14,7 @@ import sys
 
 from stratig.bot.telegram_bot import TelegramBot
 from stratig.config import Config, Secrets
+from stratig.utils import ALLOWED_TIMEFRAMES, is_supported_timeframe, normalize_timeframe
 from stratig.exchanges import build_exchange
 from stratig.logging_setup import setup_logging
 from stratig.services.trader import Trader
@@ -90,11 +91,24 @@ def main(argv: list[str] | None = None) -> int:
     env_dry = os.getenv("DRY_RUN")
     if args.dry_run:
         source = "عامر --dry-run"
-        config.set("safety.dry_run", True)
+        config.pin("safety.dry_run", True)      # يبقى مفعّلاً حتى لو عُدّل الملف
     elif env_dry is not None:
         source = f"متغير البيئة DRY_RUN={env_dry}"
     else:
         source = f"ملف الإعدادات ({args.config}: safety.dry_run = {file_dry})"
+
+    # ── التحقق من الإطار الزمني: قيمة مرفوضة = صفر إشارات بلا أي خطأ ظاهر ──
+    raw_tf = config.get("strategy.timeframe", "15m")
+    tf = normalize_timeframe(raw_tf)
+    if not is_supported_timeframe(tf):
+        log.error(
+            "الإطار الزمني \"%s\" غير مدعوم من المنصة. المسموح: %s",
+            raw_tf, ", ".join(ALLOWED_TIMEFRAMES),
+        )
+        return 2
+    if tf != str(raw_tf):
+        log.warning("تم توحيد الإطار الزمني: %s → %s", raw_tf, tf)
+        config.set("strategy.timeframe", tf)
 
     setup_logging(args.log_level)
 
@@ -122,9 +136,9 @@ def main(argv: list[str] | None = None) -> int:
 
     trader = Trader(config, exchange)
     bot = TelegramBot(secrets, config, trader)
-    log.info("الإعدادات: %s | الوضع: %s | المحاكاة: %s (المصدر: %s)",
-             config.get("exchange.name"), config.get("execution.mode"),
-             config.get("safety.dry_run"), source)
+    log.info("الإعدادات: %s | الإطار: %s | الوضع: %s | المحاكاة: %s (المصدر: %s)",
+             config.get("exchange.name"), config.get("strategy.timeframe"),
+             config.get("execution.mode"), config.get("safety.dry_run"), source)
     if bool(config.get("safety.dry_run", False)):
         log.warning(
             "وضع المحاكاة مُفعّل: لن تُرسل أي أوامر إلى المنصة. "
