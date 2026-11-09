@@ -144,7 +144,8 @@ class FakeExchange(ExchangeBase):
 
     def usdt_symbols(self, top_n=40, exclude=()):
         blocked = set(exclude or ())
-        return [s for s in self.symbols if s not in blocked][:top_n]
+        out = [s for s in self.symbols if s not in blocked]
+        return out[:top_n] if top_n and top_n > 0 else out
 
     def balance(self):
         return Balance(total=1000.0, available=900.0, unrealized=0.0)
@@ -305,3 +306,51 @@ def test_status_snapshot(tmp_path):
     assert st["mode"] == "manual"
     assert st["pending"] == 0
     assert st["stats"]["scans"] == 0
+
+
+# ═══════════════════════ فحص كل العملات ═══════════════════════
+def test_available_symbols_ignores_top_n(tmp_path):
+    trader, ex = make_trader(tmp_path, scanner__symbols_source="auto", scanner__top_n=2)
+    ex.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+    assert trader.symbols() == ["AAAUSDT", "BBBUSDT"]      # محدود بـ top_n
+    assert trader.available_symbols() == ex.symbols         # الكل بدون حد
+
+
+def test_scan_all_uses_provided_symbols(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    ex.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT"]
+    found = asyncio.run(trader.scan_once(manual=True, symbols=ex.symbols))
+    assert len(found) == 3                                  # كل الرموز تعطي إشارة
+    assert {s.symbol for s in found} == set(ex.symbols)
+    assert trader.last_scan_symbols == 3
+
+
+def test_scan_all_respects_symbols_argument_even_when_paused(tmp_path):
+    trader, ex = make_trader(tmp_path, scanner__autostart=False)
+    found = asyncio.run(trader.scan_once(manual=True, symbols=["AAAUSDT"]))
+    assert len(found) == 1
+
+
+def test_max_signals_per_scan_caps_results(tmp_path):
+    trader, ex = make_trader(tmp_path, scanner__max_signals_per_scan=2)
+    ex.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+    trader.cooldown.clear()
+    found = asyncio.run(trader.scan_once(manual=True, symbols=ex.symbols))
+    assert len(found) == 2
+
+
+def test_scan_stops_at_max_positions_without_extra_requests(tmp_path):
+    """العدّ يتم محلياً: لا يُطلب get_positions عند كل رمز."""
+    trader, ex = make_trader(tmp_path, risk__max_positions=2, execution__mode="auto")
+    ex.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT"]
+    calls = {"positions": 0}
+    original = ex.positions
+
+    def counting():
+        calls["positions"] += 1
+        return original()
+
+    ex.positions = counting
+    found = asyncio.run(trader.scan_once(manual=True, symbols=ex.symbols))
+    assert len(found) == 2                       # توقف عند max_positions
+    assert calls["positions"] <= 2               # طلب واحد في البداية (وليس 3)

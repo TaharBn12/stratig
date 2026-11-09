@@ -51,8 +51,9 @@ daily_max_loss_usdt = 0    # 0 = غير محدود (يوقف الفتح عند �
 [scanner]
 autostart = true           # يبدأ الفحص تلقائياً عند التشغيل
 interval_seconds = 120     # كل كم ثانية يتم فحص السوق
-symbols_source = "auto"    # auto = أعلى الرموز نشاطاً | manual = القائمة اليدوية
-top_n = 40                 # عدد الرموز عند symbols_source = "auto"
+symbols_source = "auto"    # auto = كل/أعلى الرموز نشاطاً | manual = القائمة اليدوية
+top_n = 0                  # 0 = فحص كل العملات | أي رقم = أعلى N رمز نشاطاً
+max_signals_per_scan = 5   # أقصى إشارات في الفحص الواحد (يمنع فيض الرسائل)
 manual_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 exclude = ["USDCUSDT", "FDUSDUSDT"]
 cooldown_seconds = 1800    # فترة سمومية لكل رمز بعد إشارة (تمنع تكرار التنبيه)
