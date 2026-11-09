@@ -21,6 +21,18 @@ from stratig.services.trader import Trader
 log = logging.getLogger("stratig")
 
 
+def force_utf8_console() -> None:
+    """يجعل طباعة العربية تعمل على CMD/PowerShell في ويندوز."""
+    if not sys.platform.startswith("win"):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:  # إصدارات قديمة أو مجرى مغلق
+            pass
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+
 def check_connection(config: Config, secrets: Secrets) -> int:
     """فحص المفاتيح والاتصال — بدون تليجرام."""
     name = str(config.get("exchange.name", "binance")).lower()
@@ -81,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="محاكاة بدون أوامر حقيقية")
     parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
     args = parser.parse_args(argv)
+    force_utf8_console()
 
     config = Config.load(args.config, args.env)
     secrets = Secrets.from_env(args.env)
