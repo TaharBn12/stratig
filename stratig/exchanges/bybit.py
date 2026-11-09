@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from ..compat import import_module_safely
 from ..data import Candles, make_candles
 from .base import (
     BUY,
@@ -38,7 +39,7 @@ class BybitFutures(ExchangeBase):
         category: str = "linear",
         dry_run: bool = False,
     ):
-        from pybit.unified_trading import HTTP
+        HTTP = import_module_safely("pybit.unified_trading", "HTTP")
 
         self.category = category
         self.testnet = bool(testnet)
