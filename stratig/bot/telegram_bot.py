@@ -328,16 +328,33 @@ class TelegramBot:
     async def _scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await self._reply(update, "🔍 جارٍ فحص السوق…")
         found = await self.trader.scan_once(manual=True)
-        extra = ""
+        await msg.edit_text(await self._scan_summary(found), parse_mode=ParseMode.HTML)
+
+    async def _scan_summary(self, found) -> str:
+        """ملخص نتيجة الفحص + تنبيه إن كانت القائمة صغيرة جداً."""
+        source_names = {"manual": "قائمة يدوية", "auto": "أعلى الرموز نشاطاً", "all": "كل العملات"}
+        source = source_names.get(self.trader.last_scan_source, "—")
+        lines = [
+            "✅ <b>انتهى الفحص</b>",
+            "",
+            f"الرموز المفحوصة: <b>{self.trader.last_scan_symbols}</b>",
+            f"المصدر: {source}",
+            f"الإشارات الجديدة: <b>{len(found)}</b>",
+            f"المدة: {self.trader.last_scan_duration:.1f} ثانية",
+        ]
         if self.trader.is_auto:
-            extra = "\n(الوضع التلقائي: تم فتح الصفقات إن وُجدت)"
+            lines.append("\n<i>الوضع التلقائي: تم فتح الصفقات إن وُجدت</i>")
         elif found:
-            extra = "\n👇 راجع الإشارات بالأعلى واضغط ✅ أو ❌"
-        await msg.edit_text(
-            f"✅ انتهى الفحص — {self.trader.last_scan_symbols} رمز، "
-            f"{len(found)} إشارة جديدة، {self.trader.last_scan_duration:.1f} ثانية.{extra}",
-            parse_mode=ParseMode.HTML,
-        )
+            lines.append("\n👇 راجع الإشارات بالأعلى واضغط ✅ أو ❌")
+
+        if self.trader.last_scan_symbols <= 3:
+            lines += [
+                "",
+                "⚠️ <b>عدد الرموز المفحوصة قليل جداً!</b>",
+                "السبب غالباً: القائمة اليدوية تحتوي رمزاً واحداً.",
+                "اضغط الزر بالأسفل لفحص كل العملات، أو أرسل /symbols لإدارة القائمة.",
+            ]
+        return "\n".join(lines)
 
     @restricted
     async def _scan_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -468,6 +485,7 @@ class TelegramBot:
         shown = ", ".join(symbols[:40]) + (" …" if len(symbols) > 40 else "")
         keyboard = InlineKeyboardMarkup(
             [
+                [InlineKeyboardButton("🌐 فحص كل العملات تلقائياً", callback_data="sym:all")],
                 [InlineKeyboardButton("🔄 تلقائي (أعلى الرموز نشاطاً)", callback_data="sym:auto")],
                 [
                     InlineKeyboardButton("➕ إضافة رمز", callback_data="sym:add"),
@@ -695,7 +713,15 @@ class TelegramBot:
         # ── الرموز ──
         if kind == "sym" and len(data) == 2:
             action = data[1]
-            if action == "auto":
+            if action == "all":
+                self.trader.use_auto_symbols(all_symbols=True)
+                count = await self._to_thread(lambda: len(self.trader.available_symbols()))
+                await query.edit_message_text(
+                    f"🌐 تم التبديل إلى <b>فحص كل العملات</b> ({count} رمز).\n"
+                    f"سيبدأ من الفحص التلقائي القادم — أو اضغط 🌐 فحص كل العملات الآن.",
+                    parse_mode=ParseMode.HTML,
+                )
+            elif action == "auto":
                 self.trader.use_auto_symbols()
                 await query.edit_message_text("🔄 تم التبديل إلى القائمة التلقائية (أعلى الرموز نشاطاً).")
             elif action == "add":

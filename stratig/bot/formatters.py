@@ -28,6 +28,12 @@ def side_ar(side: str) -> str:
     return AR_BUY if str(side).lower() == "buy" else AR_SELL
 
 
+def source_ar(source: str) -> str:
+    return {"manual": "قائمة يدوية", "auto": "أعلى الرموز نشاطاً", "all": "كل العملات"}.get(
+        str(source), str(source)
+    )
+
+
 def status_text(st: dict) -> str:
     state = "🟢 يعمل" if st["running"] else "⏸ موقوف"
     mode_ar = "تلقائي (بدون تأكيد)" if st["mode"] == "auto" else "يدوي (بتأكيدك)"
@@ -41,7 +47,7 @@ def status_text(st: dict) -> str:
         f"المحاكاة: {'مفعّلة 🧪' if st['dry_run'] else 'معطّلة'}",
         "",
         f"آخر فحص: {ago(st['last_scan'])} ({st['last_scan_duration']:.1f} ث)",
-        f"عدد الرموز المفحوصة: {st['symbols']}",
+        f"الرموز المفحوصة: {st['symbols']} ({esc(source_ar(st.get('source', '—')))})",
         f"إشارات بانتظار التأكيد: <b>{st['pending']}</b>",
         "",
         f"إشارات: {st['stats']['signals']} | صفقات مفتوحة: {st['stats']['opened']} | مغلقة: {st['stats']['closed']}",

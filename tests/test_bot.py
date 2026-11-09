@@ -140,3 +140,22 @@ def test_commands_registered():
     }
     for expected in ("start", "status", "scan", "scanall", "set", "closeall"):
         assert expected in commands
+
+
+# ═══════════════════════ ملخص الفحص والتنبيه ═══════════════════════
+def test_scan_summary_warns_when_few_symbols():
+    bot, trader, exchange = make_bot()
+    exchange.symbols = ["AAAUSDT"]
+    found = asyncio.run(trader.scan_once(manual=True))
+    summary = asyncio.run(bot._scan_summary(found))
+    assert "قليل جداً" in summary
+    assert "قائمة يدوية" in summary
+
+
+def test_scan_summary_normal_case_has_no_warning():
+    bot, trader, exchange = make_bot(scanner__symbols_source="auto", scanner__top_n=0)
+    exchange.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+    found = asyncio.run(trader.scan_once(manual=True))
+    summary = asyncio.run(bot._scan_summary(found))
+    assert "قليل جداً" not in summary
+    assert "كل العملات" in summary

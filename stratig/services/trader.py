@@ -58,6 +58,7 @@ class Trader:
         self.cooldown: dict[str, float] = {}
         self.running: bool = bool(config.get("scanner.autostart", True))
 
+        self.last_scan_source: str = ""      # auto | manual | all
         self.last_scan_at: Optional[float] = None
         self.last_scan_duration: float = 0.0
         self.last_scan_symbols: int = 0
@@ -85,15 +86,28 @@ class Trader:
         return self.mode == "auto"
 
     # ═══════════════════ الرموز ═══════════════════
-    def symbols(self, force: bool = False) -> list[str]:
-        """قائمة الرموز: auto (أعلى نشاطاً) أو manual (القائمة اليدوية)."""
+    @property
+    def symbols_source(self) -> str:
+        """مصدر قائمة الرموز: manual | auto | all"""
         source = str(self.cfg.get("scanner.symbols_source", "auto")).lower()
         if source == "manual":
-            return [s.strip().upper() for s in (self.cfg.get("scanner.manual_symbols") or []) if s]
+            return "manual"
+        return "all" if int(self.cfg.get("scanner.top_n", 40) or 0) == 0 else "auto"
+
+    def symbols(self, force: bool = False) -> list[str]:
+        """قائمة الرموز: auto (أعلى نشاطاً / الكل) أو manual (القائمة اليدوية)."""
+        source = str(self.cfg.get("scanner.symbols_source", "auto")).lower()
+        if source == "manual":
+            manual = [s.strip().upper() for s in (self.cfg.get("scanner.manual_symbols") or []) if s]
+            if not manual:
+                # قائمة يدوية فارغة → لا نفحص شيئاً، نرجع للكل وننبّه
+                log.warning("القائمة اليدوية فارغة — سيتم استخدام كل الرموز المتاحة")
+                return self.available_symbols()
+            return manual
         now = time.time()
         if force or not self._symbols_cache or now - self._symbols_ts > 1800:
             exclude = tuple(str(s).upper() for s in (self.cfg.get("scanner.exclude") or []))
-            top_n = int(self.cfg.get("scanner.top_n", 40))
+            top_n = int(self.cfg.get("scanner.top_n", 40) or 0)
             self._symbols_cache = self.exchange.usdt_symbols(top_n=top_n, exclude=exclude)
             self._symbols_ts = now
         return self._symbols_cache
@@ -117,6 +131,12 @@ class Trader:
     def add_symbol(self, symbol: str) -> None:
         clean = symbol.strip().upper()
         current = list(self.symbols())
+        if len(current) <= 1 and str(self.cfg.get("scanner.symbols_source", "auto")).lower() == "manual":
+            # القائمة اليدوية شبه فارغة: نبدأ من كل الرموز المتاحة ثم نضيف
+            try:
+                current = list(self.available_symbols())
+            except Exception:
+                pass
         if clean not in current:
             current.append(clean)
         self.set_manual_symbols(current)
@@ -128,11 +148,13 @@ class Trader:
         self.set_manual_symbols(current)
         self.invalidate_symbols()
 
-    def use_auto_symbols(self) -> None:
+    def use_auto_symbols(self, all_symbols: bool = False) -> None:
+        """الرجوع للقائمة التلقائية؛ all_symbols=True → كل العملات (top_n = 0)."""
         self.cfg.set("scanner.symbols_source", "auto")
+        if all_symbols:
+            self.cfg.set("scanner.top_n", 0)
         self.cfg.save()
-        self._symbols_cache = []
-        self._symbols_ts = 0.0
+        self.invalidate_symbols()
 
     # ═══════════════════ حدود المخاطرة ═══════════════════
     def _roll_day(self) -> None:
@@ -211,6 +233,10 @@ class Trader:
                         symbols = await asyncio.to_thread(self.available_symbols)
                     else:
                         symbols = await asyncio.to_thread(self.symbols)
+                if symbols and symbols is not self._symbols_cache:
+                    self.last_scan_source = "all" if all_symbols else self.symbols_source
+                elif symbols:
+                    self.last_scan_source = "all" if all_symbols else self.symbols_source
                 self.last_scan_symbols = len(symbols)
                 delay = float(self.cfg.get("scanner.request_delay", 0.2) or 0)
                 cap = int(self.cfg.get("scanner.max_signals_per_scan", 5) or 0)
@@ -481,6 +507,7 @@ class Trader:
             "testnet": self.exchange.testnet,
             "dry_run": bool(self.cfg.get("safety.dry_run", False)),
             "last_scan": self.last_scan_at,
+            "source": self.last_scan_source or self.symbols_source,
             "last_scan_duration": self.last_scan_duration,
             "symbols": self.last_scan_symbols,
             "pending": sum(1 for s in self.pending.values() if s.is_pending),
