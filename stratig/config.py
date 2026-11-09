@@ -13,6 +13,13 @@ from typing import Any, Iterable
 
 from dotenv import load_dotenv
 
+from .utils import (
+    ALLOWED_TIMEFRAMES,
+    DEFAULT_TIMEFRAME,
+    is_supported_timeframe,
+    normalize_timeframe,
+)
+
 log = logging.getLogger(__name__)
 
 try:  # بايثون 3.11+
@@ -190,6 +197,35 @@ class Config:
         dry = os.getenv("DRY_RUN")
         if dry is not None:
             self.set("safety.dry_run", dry.strip().lower() in ("1", "true", "yes", "on"))
+
+    def _save_quietly(self) -> None:
+        """حفظ دون إيقاف البوت إن تعذّر الكتابة (ملف للقراءة فقط مثلاً)."""
+        try:
+            self.save()
+        except OSError as err:  # pragma: no cover
+            log.warning("تعذّر حفظ %s: %s", self.path, err)
+
+    def ensure_timeframe(self) -> str:
+        """يتحقق من strategy.timeframe ويُصحّحه بدل إيقاف البوت.
+
+        يُرجع ملاحظة جاهزة للعرض في السجل (أو نصاً فارغاً إن كانت القيمة سليمة).
+        """
+        raw = self.get("strategy.timeframe", DEFAULT_TIMEFRAME)
+        tf = normalize_timeframe(raw)
+        if is_supported_timeframe(tf):
+            if tf != str(raw):
+                self.set("strategy.timeframe", tf)
+                self._save_quietly()          # نثبّت التصحيح حتى لا يتكرر كل إقلاع
+                return f"تم توحيد الإطار الزمني: {raw} → {tf}"
+            return ""
+        # قيمة لا تقبلها أي منصة → نُصحّحها ولا نوقف البوت
+        self.set("strategy.timeframe", DEFAULT_TIMEFRAME)
+        self._save_quietly()
+        return (
+            f"الإطار الزمني \"{raw}\" غير مدعوم — تم استخدام "
+            f"{DEFAULT_TIMEFRAME} بدلاً منه واستمر البوت. "
+            f"المسموح: {', '.join(ALLOWED_TIMEFRAMES)} — غيّره بـ /tf 4h"
+        )
 
     def pin(self, path: str, value: Any) -> None:
         """يثبّت قيمة من سطر الأوامر بحيث تبقى حتى بعد إعادة تحميل الملف."""

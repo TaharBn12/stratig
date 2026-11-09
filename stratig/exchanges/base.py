@@ -15,6 +15,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from ..data import Candles, make_candles
+from ..utils import normalize_timeframe
 
 BUY = "buy"
 SELL = "sell"
@@ -92,16 +93,13 @@ def fmt_num(value: float, precision: int) -> str:
 
 
 def normalize_interval(interval: Any) -> str:
-    """15 أو '15' → '15m' (Binance)."""
-    text = str(interval).strip().lower()
-    if text.isdigit():
-        return f"{int(text)}m"
-    return text
+    """15 أو '15' → '15m' · '4' → '4h' · '5min' → '5m' (Binance)."""
+    return normalize_timeframe(interval)
 
 
 def interval_to_minutes(interval: Any) -> int:
-    """'15m' → 15 (مستخدم في Bybit)."""
-    text = str(interval).strip().lower()
+    """'15m' → 15 · '4h' → 240 (مستخدم في Bybit)."""
+    text = normalize_timeframe(interval)
     if text.isdigit():
         return int(text)
     units = {"m": 1, "h": 60, "d": 60 * 24, "w": 60 * 24 * 7}

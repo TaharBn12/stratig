@@ -19,6 +19,8 @@ def esc(text) -> str:
 
 
 # ═══════════════════ الإطارات الزمنية ═══════════════════
+DEFAULT_TIMEFRAME = "15m"      # يُستخدم إن تعذّر فهم قيمة المستخدم
+
 # الإطارات التي تقبلها منصات العقود (Binance / Bybit) — أي قيمة خارجها
 # تُرفض من المنصة، فتفشل كل طلبات الشموع بصمت ولا تظهر أي إشارة.
 ALLOWED_TIMEFRAMES: tuple[str, ...] = (
@@ -33,7 +35,7 @@ _TIMEFRAME_ALIASES: dict[str, str] = {
     "1hour": "1h", "2hour": "2h", "4hour": "4h", "6hour": "6h",
     "8hour": "8h", "12hour": "12h",
     "1day": "1d", "3day": "3d", "1week": "1w", "1month": "1M",
-    "60": "1h", "240": "4h", "1440": "1d",
+    "60": "1h", "240": "4h", "1440": "1d", "24": "1d",
     "1mon": "1M", "1mo": "1M", "1month": "1M",
 }
 
@@ -53,7 +55,15 @@ def normalize_timeframe(value, default: str = "15m") -> str:
     if text in _TIMEFRAME_ALIASES:
         return _TIMEFRAME_ALIASES[text]
     if text.isdigit():
-        return f"{int(text)}m" if int(text) > 0 else default
+        number = int(text)
+        if number <= 0:
+            return default
+        if f"{number}m" in ALLOWED_TIMEFRAMES:
+            return f"{number}m"                      # 5 / 15 / 30 → دقائق
+        # 4 / 6 / 8 / 12 ليست إطارات دقائق مقبولة → الأرجح أن المستخدم يقصد ساعات
+        if f"{number}h" in ALLOWED_TIMEFRAMES:
+            return f"{number}h"
+        return default
     if text.endswith("m") and text[:-1].isdigit():
         return text                      # دقائق — الحرف m صغير دائماً
     unit = text[-1]
