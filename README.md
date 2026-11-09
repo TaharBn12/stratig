@@ -86,6 +86,7 @@ python main.py             # تشغيل البوت
 | `/positions` | الصفقات المفتوحة + زر إغلاق لكل صفقة |
 | `/pnl` | ربح اليوم + آخر 50 صفقة |
 | `/scan` | فحص السوق **الآن** (بدون انتظار الدورة) |
+| `/scanall` | فحص **كل** العملات المتاحة على المنصة (يتجاهل `top_n`) |
 | `/settings` | عرض كل الإعدادات |
 | `/set` | قائمة تفاعلية لتعديل إعداد — أو `/set tp 0.02` |
 | `/symbols` | إدارة قائمة الرموز (تلقائي/يدوي، إضافة، حذف) |
@@ -96,7 +97,14 @@ python main.py             # تشغيل البوت
 | `/help` | كل الأوامر |
 
 **مفاتيح `/set`**: `tp` `sl` `qty` `lev` `margin` `tf` `interval` `ttl`
-`cooldown` `maxpos` `topn` `minnotional` `mode` `dryrun` `both`
+`cooldown` `maxpos` `topn` `maxsig` `minnotional` `mode` `dryrun` `both`
+
+**لفحص كل العملات** (بدل أفضل 40):
+```
+/set topn 0          ← 0 تعني "كل الرموز المتاحة"
+/set interval 300    ← يُنصح برفع مدة الفحص لأن الفحص الكامل أبطأ
+```
+أو استخدم `/scanall` لفحص شامل لمرة واحدة.
 
 أمثلة:
 ```
@@ -159,6 +167,8 @@ python main.py             # تشغيل البوت
 | `scanner.interval_seconds` | `120` | كل كم يفحص البوت |
 | `scanner.cooldown_seconds` | `1800` | منع تكرار الإشارة لنفس الرمز |
 | `scanner.signal_ttl_seconds` | `900` | مدة صلاحية الإشارة قبل أن تنتهي |
+| `scanner.top_n` | `0` | `0` = فحص كل العملات، أو رقم = أعلى N رمز نشاطاً |
+| `scanner.max_signals_per_scan` | `5` | أقصى إشارات في الفحص الواحد |
 | `execution.mode` | `manual` | `manual` (بتأكيدك) أو `auto` (تلقائي) |
 | `safety.dry_run` | `false` | محاكاة بدون أوامر حقيقية |
 

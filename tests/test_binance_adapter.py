@@ -160,6 +160,11 @@ def test_usdt_symbols_filters_and_ranks_by_volume():
     assert symbols[0] == "ETHUSDT"              # الأعلى حجماً أولاً
 
 
+def test_usdt_symbols_zero_means_all():
+    ex = make_exchange()
+    assert ex.usdt_symbols(top_n=0) == ["ETHUSDT", "BTCUSDT"]
+
+
 def test_usdt_symbols_excludes_blocked():
     ex = make_exchange()
     assert ex.usdt_symbols(top_n=10, exclude=("ETHUSDT",)) == ["BTCUSDT"]

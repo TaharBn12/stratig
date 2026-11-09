@@ -98,6 +98,11 @@ class Trader:
             self._symbols_ts = now
         return self._symbols_cache
 
+    def available_symbols(self) -> list[str]:
+        """كل الرموز المتاحة على المنصة (بدون حد top_n)."""
+        exclude = tuple(str(s).upper() for s in (self.cfg.get("scanner.exclude") or []))
+        return self.exchange.usdt_symbols(top_n=0, exclude=exclude)
+
     def set_manual_symbols(self, symbols: list[str]) -> None:
         clean = [s.strip().upper() for s in symbols if s and s.strip()]
         self.cfg.set("scanner.manual_symbols", clean)
@@ -163,8 +168,17 @@ class Trader:
             return 0.0
 
     # ═══════════════════ الفحص ═══════════════════
-    async def scan_once(self, manual: bool = False) -> list[PendingSignal]:
-        """يفحص كل الرموز ويرجع الإشارات الجديدة."""
+    async def scan_once(
+        self,
+        manual: bool = False,
+        symbols: Optional[list[str]] = None,
+        all_symbols: bool = False,
+    ) -> list[PendingSignal]:
+        """يفحص الرموز ويرجع الإشارات الجديدة.
+
+        symbols     : قائمة مخصّصة للفحص (بدل إعدادات الماسح)
+        all_symbols : True = فحص كل الرموز المتاحة على المنصة (يتجاهل top_n)
+        """
         if not manual and not self.running:
             return []
         if self._lock.locked():
@@ -192,16 +206,28 @@ class Trader:
                         )
                     return []
 
-                symbols = await asyncio.to_thread(self.symbols)
+                if symbols is None:
+                    if all_symbols:
+                        symbols = await asyncio.to_thread(self.available_symbols)
+                    else:
+                        symbols = await asyncio.to_thread(self.symbols)
                 self.last_scan_symbols = len(symbols)
                 delay = float(self.cfg.get("scanner.request_delay", 0.2) or 0)
+                cap = int(self.cfg.get("scanner.max_signals_per_scan", 5) or 0)
 
+                # نعدّ الصفقات محلياً (بدل طلبها من المنصة عند كل رمز — يضاعف الطلبات)
+                open_count = len(positions)
                 for symbol in symbols:
-                    if len(await asyncio.to_thread(self.exchange.open_position_symbols)) >= max_pos:
+                    if open_count >= max_pos:
                         break
                     sig = await self._evaluate_symbol(symbol, positions)
                     if sig:
                         found.append(sig)
+                        if sig.status == STATUS_OPENED:   # الوضع التلقائي فتحها فوراً
+                            open_count += 1
+                        if cap and len(found) >= cap:
+                            log.info("تم الوصول لحد الإشارات في الفحص الواحد (%s) — توقف", cap)
+                            break
                     if delay:
                         await asyncio.sleep(delay)
 

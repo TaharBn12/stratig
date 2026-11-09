@@ -60,6 +60,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "interval_seconds": 120,
         "symbols_source": "auto",
         "top_n": 40,
+        "max_signals_per_scan": 5,
         "manual_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
         "exclude": ["USDCUSDT", "FDUSDUSDT"],
         "cooldown_seconds": 1800,

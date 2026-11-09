@@ -33,7 +33,8 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📊 الحالة"), KeyboardButton("💰 الرصيد")],
         [KeyboardButton("📈 الصفقات"), KeyboardButton("💹 الأرباح")],
-        [KeyboardButton("🔍 فحص الآن"), KeyboardButton("⚙️ الإعدادات")],
+        [KeyboardButton("🔍 فحص الآن"), KeyboardButton("🌐 فحص كل العملات")],
+        [KeyboardButton("⚙️ الإعدادات"), KeyboardButton("❔ مساعدة")],
         [KeyboardButton("⏸ إيقاف المسح"), KeyboardButton("▶️ تشغيل المسح")],
     ],
     resize_keyboard=True,
@@ -46,6 +47,7 @@ TEXT_COMMANDS = {
     "📈 الصفقات": "positions",
     "💹 الأرباح": "pnl",
     "🔍 فحص الآن": "scan",
+    "🌐 فحص كل العملات": "scanall",
     "⚙️ الإعدادات": "settings",
     "⏸ إيقاف المسح": "pause",
     "▶️ تشغيل المسح": "resume",
@@ -64,7 +66,8 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "ttl": ("scanner.signal_ttl_seconds", "int", "مدة صلاحية الإشارة بالثواني — مثال: 900"),
     "cooldown": ("scanner.cooldown_seconds", "int", "فترة السمومية لكل رمز بالثواني — مثال: 1800"),
     "maxpos": ("risk.max_positions", "int", "أقصى عدد صفقات مفتوحة — مثال: 5"),
-    "topn": ("scanner.top_n", "int", "عدد الرموز المفحوصة — مثال: 40"),
+    "topn": ("scanner.top_n", "int", "عدد الرموز المفحوصة — 0 = كل العملات"),
+    "maxsig": ("scanner.max_signals_per_scan", "int", "أقصى إشارات في الفحص الواحد — مثال: 5"),
     "minnotional": ("risk.min_notional", "float", "أدنى قيمة للصفقة بالـ USDT — مثال: 20"),
     "mode": ("execution.mode", "choice:manual,auto", "وضع التنفيذ"),
     "dryrun": ("safety.dry_run", "bool", "المحاكاة (لا تُرسل أوامر حقيقية)"),
@@ -134,6 +137,7 @@ class TelegramBot:
             ("positions", self._positions),
             ("pnl", self._pnl),
             ("scan", self._scan),
+            ("scanall", self._scan_all),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -303,6 +307,41 @@ class TelegramBot:
         )
 
     @restricted
+    async def _scan_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """فحص كل العملات المتاحة على المنصة (بدون حد top_n)."""
+        msg = await self._reply(update, "🌐 جارٍ جلب كل الرموز المتاحة…")
+        try:
+            all_symbols = await self._to_thread(self.trader.available_symbols)
+        except Exception as err:
+            await msg.edit_text(f"❌ تعذّر جلب الرموز:\n<code>{fmt.esc(str(err))}</code>",
+                                parse_mode=ParseMode.HTML)
+            return
+
+        total = len(all_symbols)
+        delay = float(self.cfg.get("scanner.request_delay", 0.2) or 0)
+        eta = int(total * delay)
+        await msg.edit_text(
+            f"🌐 جارٍ فحص <b>كل العملات</b>: {total} رمز\n"
+            f"⏱ الوقت المتوقع: نحو {eta} ثانية…",
+            parse_mode=ParseMode.HTML,
+        )
+
+        found = await self.trader.scan_once(manual=True, symbols=all_symbols)
+
+        extra = ""
+        if self.trader.is_auto:
+            extra = "\n(الوضع التلقائي: تم فتح الصفقات إن وُجدت)"
+        elif found:
+            extra = "\n👇 راجع الإشارات بالأعلى واضغط ✅ أو ❌"
+        await msg.edit_text(
+            f"✅ انتهى فحص <b>كل العملات</b>\n"
+            f"الرموز المفحوصة: {total}\n"
+            f"الإشارات الجديدة: {len(found)}\n"
+            f"المدة: {self.trader.last_scan_duration:.1f} ثانية{extra}",
+            parse_mode=ParseMode.HTML,
+        )
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -366,7 +405,8 @@ class TelegramBot:
             "ttl": lambda v: int(v) >= 60 or "مدة الإشارة 60 ثانية على الأقل",
             "cooldown": lambda v: int(v) >= 0 or "قيمة غير صالحة",
             "maxpos": lambda v: 1 <= int(v) <= 50 or "أقصى صفقات بين 1 و 50",
-            "topn": lambda v: 1 <= int(v) <= 200 or "عدد الرموز بين 1 و 200",
+            "topn": lambda v: 0 <= int(v) <= 2000 or "عدد الرموز بين 0 و 2000 (0 = الكل)",
+            "maxsig": lambda v: 1 <= int(v) <= 50 or "أقصى إشارات بين 1 و 50",
         }
         if key in checks:
             result = checks[key](value)
@@ -402,9 +442,16 @@ class TelegramBot:
                 ],
             ]
         )
+        total = "؟"
+        try:
+            total = str(len(await self._to_thread(self.trader.available_symbols)))
+        except Exception:
+            pass
         await self._reply(
             update,
-            f"📋 <b>قائمة الرموز</b> ({len(symbols)} رمز — المصدر: {source})\n\n<code>{fmt.esc(shown)}</code>",
+            f"📋 <b>قائمة الرموز</b>\n"
+            f"المفحوصة حالياً: {len(symbols)} من {total} رمز متاح على المنصة\n"
+            f"المصدر: {source}\n\n<code>{fmt.esc(shown)}</code>",
             keyboard,
         )
 
@@ -481,6 +528,7 @@ class TelegramBot:
             "positions": self._positions,
             "pnl": self._pnl,
             "scan": self._scan,
+            "scanall": self._scan_all,
             "settings": self._settings,
             "pause": self._pause,
             "resume": self._resume,
