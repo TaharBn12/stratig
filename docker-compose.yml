@@ -10,6 +10,6 @@ services:
       TZ: UTC
       PYTHONUNBUFFERED: "1"
     volumes:
-      # config.yaml قابل للكتابة لأن البوت يحفظ الإعدادات عند استخدام /set
-      - ./config.yaml:/app/config.yaml
+      # config.toml قابل للكتابة لأن البوت يحفظ الإعدادات عند استخدام /set
+      - ./config.toml:/app/config.toml
       - ./logs:/app/logs

@@ -75,7 +75,7 @@ def check_connection(config: Config, secrets: Secrets) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="بوت تليجرام لتداول العقود الآجلة")
-    parser.add_argument("--config", default=os.getenv("STRATIG_CONFIG", "config.yaml"))
+    parser.add_argument("--config", default=os.getenv("STRATIG_CONFIG", "config.toml"))
     parser.add_argument("--env", default=os.getenv("STRATIG_ENV", ".env"))
     parser.add_argument("--check", action="store_true", help="فحص الاتصال بالمنصة فقط")
     parser.add_argument("--dry-run", action="store_true", help="محاكاة بدون أوامر حقيقية")

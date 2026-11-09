@@ -117,7 +117,7 @@ def main() -> int:
                         "manual_symbols": ["BULLUSDT", "BEARUSDT", "FLATUSDT"]},
             "safety": {"dry_run": True},
         },
-        path=ROOT / "config.yaml",
+        path=ROOT / "config.toml",
     )
     trader = Trader(cfg, DemoExchange())
     trader.attach_notifier(Notifier())   # يطبع في الطرفية بدل تليجرام

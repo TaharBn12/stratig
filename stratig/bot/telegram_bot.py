@@ -52,7 +52,7 @@ TEXT_COMMANDS = {
     "❔ مساعدة": "help",
 }
 
-# key: (مسار في config.yaml، نوع القيمة، وصف للمستخدم)
+# key: (مسار في config.toml، نوع القيمة، وصف للمستخدم)
 SET_KEYS: dict[str, tuple[str, str, str]] = {
     "tp": ("trade.take_profit_pct", "float", "جني الأرباح — مثال: 0.02 أو 2%"),
     "sl": ("trade.stop_loss_pct", "float", "وقف الخسارة — مثال: 0.01 أو 1%"),
@@ -333,7 +333,7 @@ class TelegramBot:
         return InlineKeyboardMarkup(rows)
 
     def _apply_setting(self, key: str, raw: str) -> tuple[bool, str]:
-        """يطبّق قيمة جديدة ويحفظها في config.yaml."""
+        """يطبّق قيمة جديدة ويحفظها في config.toml."""
         if key not in SET_KEYS:
             return False, f"❌ إعداد غير معروف: {fmt.esc(key)}"
         path, kind, hint = SET_KEYS[key]

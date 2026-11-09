@@ -20,7 +20,7 @@
 | 🔒 أمان | قائمة بيضاء للمستخدمين + رفض التشغيل الحقيقي دون `CONFIRM_LIVE_TRADING=1` |
 | 🛡️ حماية تلقائية | لا تُترك صفقة بلا `وقف خسارة` — وإلا تُغلق فوراً |
 | 🔁 منصتان | **Binance Futures** (افتراضي، مع التيستنت) و **Bybit** — بنفس الكود |
-| ⚙️ إعدادات حيّة | عدّل كل شيء من `/set` بدون إعادة تشغيل (يُحفظ في `config.yaml`) |
+| ⚙️ إعدادات حيّة | عدّل كل شيء من `/set` بدون إعادة تشغيل (يُحفظ في `config.toml`) |
 | 📊 إدارة مخاطرة | أقصى صفقات، حد يومي للصفقات، حد يومي للخسارة، فترة سمومية لكل رمز |
 
 ---
@@ -58,6 +58,7 @@ python3 -m venv .venv
 source .venv/bin/activate          # ويندوز: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+> لا حاجة لأي مصنّف C++ : الإعدادات TOML (مكتبة قياسية) والمؤشرات محسوبة داخلياً بـ pandas.
 
 ### 5) تحقّق ثم تشغيل
 ```bash
@@ -141,7 +142,7 @@ python main.py             # تشغيل البوت
   (أي تغلق كامل الصفقة تلقائياً عند التحقيق).
 - إن فشل وضع **وقف الخسارة** → يُغلق المركز فوراً حمايةً للمال.
 
-### أهم الإعدادات (config.yaml)
+### أهم الإعدادات (config.toml)
 | المسار | الافتراضي | المعنى |
 |---|---|---|
 | `strategy.timeframe` | `15m` | الإطار الزمني |
@@ -162,10 +163,10 @@ python main.py             # تشغيل البوت
 ## 🔁 التبديل إلى Bybit أو التداول الحقيقي
 
 **Bybit** (نفس الكود، محوّل جاهز):
-```yaml
-exchange:
-  name: bybit
-  testnet: true        # https://testnet.bybit.com
+```toml
+[exchange]
+name = "bybit"
+testnet = true        # https://testnet.bybit.com
 ```
 مع مفاتيح `BYBIT_TESTNET_API_KEY` / `BYBIT_TESTNET_API_SECRET` في `.env`.
 
@@ -185,12 +186,12 @@ BINANCE_API_SECRET=...
 ```
 stratig/
 ├── main.py                     # نقطة الدخول (--check / --dry-run)
-├── config.yaml                 # كل الإعدادات (يُعدَّل من تليجرام أيضاً)
+├── config.toml                 # كل الإعدادات (يُعدَّل من تليجرام أيضاً)
 ├── .env                        # الأسرار فقط (غير مرفوع لـ Git)
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml / stratig-bot.service
 ├── stratig/
-│   ├── config.py               # تحميل config.yaml + .env
+│   ├── config.py               # تحميل config.toml + .env
 │   ├── utils.py                # أدوات مشتركة
 │   ├── logging_setup.py
 │   ├── exchanges/

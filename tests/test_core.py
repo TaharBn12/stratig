@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -63,12 +62,12 @@ def test_make_klines_order():
 
 # ═══════════════════════ الإعدادات ═══════════════════════
 def test_config_defaults_and_set(tmp_path):
-    cfg = Config({}, path=tmp_path / "config.yaml")
+    cfg = Config({}, path=tmp_path / "config.toml")
     assert cfg.get("exchange.name") == "binance"
     assert cfg.get("strategy.rsi.period") == 14
     cfg.set("trade.take_profit_pct", 0.02)
     cfg.save()
-    loaded = Config.load(tmp_path / "config.yaml")
+    loaded = Config.load(tmp_path / "config.toml")
     assert loaded.get("trade.take_profit_pct") == 0.02
 
 
@@ -98,7 +97,7 @@ def test_secrets_reads_env(monkeypatch, tmp_path):
 def test_config_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("EXCHANGE", "bybit")
     monkeypatch.setenv("TESTNET", "false")
-    cfg = Config.load(tmp_path / "missing.yaml", tmp_path / "missing.env")
+    cfg = Config.load(tmp_path / "missing.toml", tmp_path / "missing.env")
     assert cfg.get("exchange.name") == "bybit"
     assert cfg.get("exchange.testnet") is False
 
@@ -165,7 +164,7 @@ def make_trader(tmp_path, **overrides):
     for key, value in overrides.items():
         section, name = key.split("__", 1)
         data.setdefault(section, {})[name] = value
-    cfg = Config(data, path=tmp_path / "config.yaml")
+    cfg = Config(data, path=tmp_path / "config.toml")
     ex = FakeExchange()
     return Trader(cfg, ex), ex
 

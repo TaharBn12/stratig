@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.config import Config  # noqa: E402
 from stratig.strategy import evaluate, rsi_signal, williams_r_signal  # noqa: E402
+from stratig.strategy import indicators  # noqa: E402
 
 
 def make_df(sign: int = 1, decline: float = 1.0, n_dec: int = 100, n_steep: int = 20,
@@ -137,3 +138,30 @@ def test_use_closed_candles_drops_last_bar():
     assert d_open.side == "buy"
     # الشمعة الأخيرة (الارتداد نفسُه) هي مصدر الإشارة، فعند تجاهلها تتغيّر النتيجة
     assert d_closed.price == pytest.approx(float(df["Close"].iloc[-2]))
+
+
+# ───────────── مطابقة الحساب الداخلي لمكتبة ta (إن كانت مثبتة) ─────────────
+def _maybe_ta():
+    try:
+        import ta as _ta
+
+        return _ta
+    except ImportError:  # المكتبة اختيارية ولم تعد مطلوبة للتشغيل
+        return None
+
+
+def test_native_indicators_match_ta_when_available():
+    """تأكيد أن الحساب الداخلي يطابق مكتبة ta (إن وُجدت على الجهاز)."""
+    ta_mod = _maybe_ta()
+    if ta_mod is None:
+        pytest.skip("مكتبة ta غير مثبتة (اختيارية)")
+
+    df = make_df(sign=1, n_dec=150)
+    close, high, low = df["Close"], df["High"], df["Low"]
+
+    assert (indicators.rsi(close, 14) - ta_mod.momentum.RSIIndicator(close, window=14).rsi()).abs().max() < 1e-9
+    assert (indicators.williams_r(high, low, close, 24)
+            - ta_mod.momentum.WilliamsRIndicator(high, low, close, lbp=24).williams_r()).abs().max() < 1e-9
+
+    w = indicators.williams_r(high, low, close, 24).dropna()
+    assert (indicators.ema(w, 24) - ta_mod.trend.ema_indicator(w, window=24).dropna()).abs().max() < 1e-9

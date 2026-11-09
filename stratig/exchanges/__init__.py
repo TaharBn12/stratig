@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 def build_exchange(config: Config, secrets) -> ExchangeBase:
-    """ينشئ كائن المنصة من (config.yaml + .env)."""
+    """ينشئ كائن المنصة من (config.toml + .env)."""
     name = str(config.get("exchange.name", "binance")).strip().lower()
     testnet = bool(config.get("exchange.testnet", True))
     dry_run = bool(config.get("safety.dry_run", False))
