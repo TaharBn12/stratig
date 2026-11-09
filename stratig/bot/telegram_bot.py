@@ -24,6 +24,7 @@ from telegram.ext import (
 )
 
 from ..config import Config, Secrets
+from ..utils import ALLOWED_TIMEFRAMES, is_supported_timeframe, normalize_timeframe
 from ..services.notifier import TelegramNotifier
 from ..services.trader import Trader
 from . import formatters as fmt
@@ -149,6 +150,8 @@ class TelegramBot:
             ("live", self._live),
             ("dryrun", self._dry_run_mode),
             ("real", self._live),
+            ("reload", self._reload),
+            ("tf", self._timeframe),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -264,12 +267,27 @@ class TelegramBot:
             self._scan_lock = asyncio.Lock()
         return self._scan_lock
 
+    def _reload_config_if_changed(self) -> None:
+        """يلتقط التعديلات اليدوية على config.toml أثناء عمل البوت."""
+        if not self.cfg.reload():
+            return
+        log.info("🔁 تم تحديث الإعدادات من %s", self.cfg.path)
+        exchange = getattr(self.trader, "exchange", None)
+        if exchange is not None:
+            exchange.dry_run = bool(self.cfg.get("safety.dry_run", False))
+        self.trader.invalidate_symbols()
+        self._schedule_scan()
+
     async def _run_scan_cycle(self) -> None:
         lock = self._get_scan_lock()
         if lock.locked():
             log.info("تخطّي دورة الفحص: الدورة السابقة لم تنتهِ بعد")
             return
         async with lock:
+            try:
+                self._reload_config_if_changed()
+            except Exception as err:
+                log.warning("تعذّرت إعادة قراءة الإعدادات: %s", err)
             try:
                 await self.trader.notify_expired()
                 await self.trader.scan_once()
@@ -579,6 +597,57 @@ class TelegramBot:
         )
 
     @restricted
+    async def _timeframe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/tf 5m — اختصار لتغيير الإطار الزمني."""
+        args = context.args or []
+        if not args:
+            await self._reply(update, self._timeframe_text())
+            return
+        ok, message = self._apply_setting("tf", args[0])
+        await self._reply(update, message)
+
+    def _timeframe_text(self) -> str:
+        current = str(self.cfg.get("strategy.timeframe", "15m"))
+        pending = sum(1 for s in self.trader.cooldown.values() if s > time.time())
+        return "\n".join(
+            [
+                "⏱ <b>الإطار الزمني</b>",
+                "",
+                f"الحالي: <code>{fmt.esc(current)}</code>",
+                f"رموز داخل فترة السمومية: {pending}",
+                "",
+                "للتغيير: <code>/tf 5m</code> أو <code>/set tf 1h</code>",
+                f"المسموح: <code>{'  '.join(ALLOWED_TIMEFRAMES)}</code>",
+                "",
+                "<i>تغيير الإطار يمسح فترة السمومية تلقائياً ليظهر أثره في الفحص القادم.</i>",
+            ]
+        )
+
+    @restricted
+    async def _reload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/reload — إعادة قراءة config.toml من القرص (للتعديلات اليدوية)."""
+        changed = self.cfg.reload()
+        if not changed:
+            await self._reply(
+                update,
+                f"ℹ️ لا تغييرات في <code>{fmt.esc(str(self.cfg.path))}</code>\n"
+                "للتعديل من تليجرام استخدم /set أو /tf",
+            )
+            return
+        exchange = getattr(self.trader, "exchange", None)
+        if exchange is not None:
+            exchange.dry_run = bool(self.cfg.get("safety.dry_run", False))
+        self.trader.invalidate_symbols()
+        self._schedule_scan()
+        await self._reply(
+            update,
+            "🔁 <b>تم تحديث الإعدادات من الملف</b>\n\n"
+            f"الإطار الزمني: <code>{fmt.esc(str(self.cfg.get('strategy.timeframe')))}</code>\n"
+            f"المحاكاة: <code>{self.cfg.get('safety.dry_run')}</code>\n"
+            f"مدة الفحص: <code>{self.cfg.get('scanner.interval_seconds')}</code> ثانية",
+        )
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -632,6 +701,17 @@ class TelegramBot:
         except (TypeError, ValueError):
             return False, f"❌ قيمة غير صالحة. {hint}"
 
+        if key == "tf":
+            # 5 / 5min / 5M / 1h → 5m / 1h … ورفض ما لا تقبله المنصة
+            normalized = normalize_timeframe(value)
+            if not is_supported_timeframe(normalized):
+                allowed = "  ".join(ALLOWED_TIMEFRAMES)
+                return False, (
+                    f"❌ إطار زمني غير مدعوم: <code>{fmt.esc(text)}</code>\n"
+                    f"المسموح: <code>{allowed}</code>"
+                )
+            value = normalized
+
         # تحققات إضافية
         checks = {
             "lev": lambda v: 1 <= int(v) <= 125 or "الرافعة بين 1 و 125",
@@ -663,6 +743,16 @@ class TelegramBot:
             exchange = getattr(self.trader, "exchange", None)
             if exchange is not None:
                 exchange.dry_run = bool(value)
+        if key == "tf":
+            # السمومية القديمة كانت تمنع ظهور إشارات الإطار الجديد لمدة 30 دقيقة
+            cleared = self.trader.on_timeframe_changed()
+            self.trader.invalidate_symbols()
+            note = (f"\n⏱ الإطار الزمني الآن <b>{fmt.esc(str(value))}</b>"
+                    f" — مُسحت السمومية عن {cleared} رمزاً، ويُستخدم في الفحص القادم.")
+            return True, (
+                f"✅ تم التعديل\n<b>tf</b>: <code>{fmt.esc(str(old))}</code>"
+                f" ← <code>{fmt.esc(str(value))}</code>" + note
+            )
 
         note = "\n🔁 تمت إعادة جدولة الفحص." if key == "interval" else ""
         if key == "dryrun":

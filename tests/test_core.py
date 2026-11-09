@@ -15,6 +15,7 @@ from stratig.data import make_candles  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
     ExchangeBase,
+    ExchangeError,
     OrderResult,
     Position,
     SymbolInfo,
@@ -23,6 +24,7 @@ from stratig.exchanges.base import (  # noqa: E402
     normalize_interval,
     round_step,
 )
+from stratig.services.notifier import MessageRef, Notifier  # noqa: E402
 from stratig.services.trader import STATUS_EXPIRED, STATUS_OPENED, STATUS_SKIPPED, Trader  # noqa: E402
 from tests.test_strategy import make_candles as make_signal_candles  # noqa: E402
 
@@ -440,3 +442,56 @@ def test_opened_text_marks_simulation(tmp_path):
     sig = asyncio.run(trader.scan_once())[0]
     asyncio.run(trader.open_signal(sig.id))
     assert "محاكاة" in trader._opened_text(sig)
+
+
+def test_on_timeframe_changed_clears_cooldown(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    trader.cooldown["AAAUSDT"] = time.time() + 1800
+    cleared = trader.on_timeframe_changed()
+    assert cleared == 1
+    assert trader.cooldown == {}
+
+
+def test_total_kline_failure_is_reported_once(tmp_path):
+    """"فشل كل الرموز" يجب أن يُبلَّغ عنه بدل الصمت (إطار مرفوض مثلاً)."""
+    trader, ex = make_trader(tmp_path)
+
+    class RecordingNotifier(Notifier):
+        def __init__(self):
+            self.messages: list[str] = []
+
+        async def send(self, text, buttons=None, chat_id=None):
+            self.messages.append(text)
+            return MessageRef()
+
+    trader.notifier = RecordingNotifier()
+
+    def boom(symbol, interval="15m", limit=500):
+        raise ExchangeError("Invalid interval")
+
+    ex.klines = boom
+    asyncio.run(trader.scan_once())              # فحص تلقائي (غير يدوي)
+    assert any("تعذّر جلب الشموع" in m for m in trader.notifier.messages)
+
+    count = len(trader.notifier.messages)
+    asyncio.run(trader.scan_once())
+    assert len(trader.notifier.messages) == count      # مرّة واحدة فقط
+
+
+def test_timeframe_is_read_per_scan(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    seen: list[str] = []
+    original = ex.klines
+
+    def spy(symbol, interval="15m", limit=500):
+        seen.append(interval)
+        return original(symbol, interval, limit)
+
+    ex.klines = spy
+    asyncio.run(trader.scan_once())
+    assert seen and seen[0] == "15m"
+    trader.cfg.set("strategy.timeframe", "1h")
+    trader.on_timeframe_changed()          # يمسح السمومية (كما يفعل /set tf)
+    trader.pending.clear()
+    asyncio.run(trader.scan_once())
+    assert "1h" in seen
