@@ -1,7 +1,7 @@
 """محوّل Bybit (عقود linear USDT) — مبني على pybit مثل كودك الأصلي.
 
 مُبقًى عليه حتى تستطيع الرجوع إلى Bybit في أي لحظة بتغيير:
-    exchange.name: bybit   في ملف config.yaml
+    exchange.name = "bybit"   في ملف config.toml
 
 ملاحظة: Bybit يُعيد الشموع من الأحدث إلى الأقدم → نعكسها ليصبح
 آخر صف هو أحدث شمعة (نفس منطق Derivatives.py).

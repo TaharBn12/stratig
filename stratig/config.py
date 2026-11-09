@@ -1,4 +1,8 @@
-"""تحميل الإعدادات (config.yaml) والأسرار (.env)."""
+"""تحميل الإعدادات (config.toml) والأسرار (.env).
+
+ملاحظة مهمة: الإعدادات بصيغة **TOML** (المكتبة القياسية `tomllib` في بايثون 3.11+)
+حتى لا نحتاج أي مكتبة خارجية تحتاج مصنّف C++ على ويندوز (مثل PyYAML).
+"""
 from __future__ import annotations
 
 import os
@@ -6,11 +10,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
 
-import yaml
 from dotenv import load_dotenv
 
+try:  # بايثون 3.11+
+    import tomllib
+except ModuleNotFoundError:  # بايثون أقدم: tomli الاختياري
+    tomllib = None  # type: ignore[assignment]
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+LEGACY_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -75,6 +84,46 @@ def deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+# ═════════════════════════ كاتب TOML بسيط ═════════════════════════
+def _toml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def _toml_key(key: str) -> str:
+    clean = key.replace("_", "").replace("-", "")
+    return key if clean.isalnum() else _toml_scalar(key)
+
+
+def toml_dumps(data: dict[str, Any]) -> str:
+    """يحوّل القاموس إلى نص TOML (يكفي احتياجات ملف الإعدادات)."""
+    lines: list[str] = []
+
+    def emit(table: dict[str, Any], prefix: str = "") -> None:
+        simple, nested = [], []
+        for key, value in table.items():
+            (nested if isinstance(value, dict) else simple).append((key, value))
+        for key, value in simple:
+            rendered = (
+                "[" + ", ".join(_toml_scalar(item) for item in value) + "]"
+                if isinstance(value, (list, tuple))
+                else _toml_scalar(value)
+            )
+            lines.append(f"{_toml_key(key)} = {rendered}")
+        for key, value in nested:
+            lines.append("")
+            lines.append(f"[{prefix}{_toml_key(key)}]")
+            emit(value, f"{prefix}{_toml_key(key)}.")
+
+    emit(data)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# ═════════════════════════ الإعدادات ═════════════════════════
 class Config:
     """وصول بسيط للإعدادات عبر مسارات نقطية: cfg.get('trade.take_profit_pct')."""
 
@@ -87,13 +136,37 @@ class Config:
     def load(cls, path: str | Path | None = None, env_path: str | Path | None = None) -> "Config":
         load_dotenv(env_path or DEFAULT_ENV_PATH, override=False)
         cfg_path = Path(path) if path else DEFAULT_CONFIG_PATH
+
+        if not cfg_path.exists() and path is None and LEGACY_CONFIG_PATH.exists():
+            cfg_path = LEGACY_CONFIG_PATH  # توافق مع النسخة القديمة (config.yaml)
+
         data: dict[str, Any] = {}
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as fh:
-                data = yaml.safe_load(fh) or {}
+            data = cls._read_file(cfg_path)
         cfg = cls(data, cfg_path)
         cfg._apply_env_overrides()
         return cfg
+
+    @staticmethod
+    def _read_file(path: Path) -> dict[str, Any]:
+        suffix = path.suffix.lower()
+        if suffix in (".toml",):
+            if tomllib is None:
+                print("⚠️  بايثون أقدم من 3.11 ولا توجد مكتبة tomli — سيتم استخدام الإعدادات الافتراضية")
+                return {}
+            with open(path, "rb") as fh:
+                return tomllib.load(fh) or {}
+        if suffix in (".yaml", ".yml"):
+            try:
+                import yaml  # اختياري: فقط لملفات قديمة بصيغة YAML
+            except ImportError:
+                print(f"⚠️  ملف {path.name} بصيغة YAML ومكتبة PyYAML غير مثبتة — "
+                      f"سيتم استخدام الإعدادات الافتراضية (أو أنشئ config.toml)")
+                return {}
+            with open(path, "r", encoding="utf-8") as fh:
+                return yaml.safe_load(fh) or {}
+        print(f"⚠️  صيغة غير مدعومة لملف الإعدادات: {path.name}")
+        return {}
 
     def _apply_env_overrides(self) -> None:
         """متغيرات البيئة تطغى على الملف (مفيد في Docker)."""
@@ -109,7 +182,7 @@ class Config:
 
     def save(self) -> None:
         with open(self.path, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(self._data, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            fh.write(toml_dumps(self._data))
 
     # ---------- وصول ----------
     def get(self, path: str, default: Any = None) -> Any:
