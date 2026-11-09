@@ -37,6 +37,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("🔍 فحص الآن"), KeyboardButton("🌐 فحص كل العملات")],
         [KeyboardButton("⚙️ الإعدادات"), KeyboardButton("❔ مساعدة")],
         [KeyboardButton("⏸ إيقاف المسح"), KeyboardButton("▶️ تشغيل المسح")],
+        [KeyboardButton("🔴 تنفيذ حقيقي"), KeyboardButton("🧪 محاكاة")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -52,6 +53,8 @@ TEXT_COMMANDS = {
     "⚙️ الإعدادات": "settings",
     "⏸ إيقاف المسح": "pause",
     "▶️ تشغيل المسح": "resume",
+    "🔴 تنفيذ حقيقي": "live",
+    "🧪 محاكاة": "dryrun",
     "❔ مساعدة": "help",
 }
 
@@ -143,6 +146,9 @@ class TelegramBot:
             ("scanall", self._scan_all),
             ("data", self._data),
             ("protect", self._protect),
+            ("live", self._live),
+            ("dryrun", self._dry_run_mode),
+            ("real", self._live),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -187,6 +193,11 @@ class TelegramBot:
     def _startup_text(self) -> str:
         net = "تيستنت 🧪" if self.trader.exchange.testnet else "حقيقي 🔴"
         mode = "يدوي (بانتظار تأكيدك)" if not self.trader.is_auto else "تلقائي"
+        if bool(self.cfg.get("safety.dry_run", False)):
+            exec_line = ("التنفيذ: 🧪 <b>محاكاة</b> — لن تُرسل أي أوامر "
+                         "(للتنفيذ الحقيقي: /live)")
+        else:
+            exec_line = "التنفيذ: 🔴 <b>أوامر حقيقية</b> تُرسل إلى المنصة"
         return "\n".join(
             [
                 "🚀 <b>بوت Stratig يعمل الآن</b>",
@@ -195,6 +206,7 @@ class TelegramBot:
                 f"الاستراتيجية: RSI + Williams %R (تأكيد مزدوج: {self.cfg.get('strategy.require_both')})",
                 f"الإطار الزمني: {self.cfg.get('strategy.timeframe')}",
                 f"وضع التنفيذ: {mode}",
+                exec_line,
                 f"الفحص: كل {self.cfg.get('scanner.interval_seconds')} ثانية",
                 "",
                 "اضغط 🔍 فحص الآن لتفحص السوق فوراً، أو ❔ مساعدة لكل الأوامر.",
@@ -514,6 +526,59 @@ class TelegramBot:
         await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     @restricted
+    async def _live(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/live — تفعيل التنفيذ الحقيقي: كل تأكيد يُرسل أمراً فعلياً للمنصة."""
+        await self._reply(update, self._toggle_dry_run(False))
+
+    @restricted
+    async def _dry_run_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/dryrun — وضع المحاكاة: تحليل حقيقي بلا أي أوامر."""
+        await self._reply(update, self._toggle_dry_run(True))
+
+    def _toggle_dry_run(self, dry: bool) -> str:
+        """يبدّل وضع المحاكاة فوراً (بدون إعادة تشغيل) ويحفظه في config.toml."""
+        self.cfg.set("safety.dry_run", bool(dry))
+        try:
+            self.cfg.save()
+            saved = "✅ حُفظ في config.toml"
+        except Exception as err:  # pragma: no cover
+            log.warning("تعذّر حفظ الإعدادات: %s", err)
+            saved = "⚠️ لم يُحفظ في الملف (سيعود بعد إعادة التشغيل)"
+
+        exchange = getattr(self.trader, "exchange", None)
+        synced = ""
+        if exchange is not None:
+            exchange.dry_run = bool(dry)          # تطبيق فوري على كائن المنصة
+            synced = "وطُبّق فوراً على جلسة المنصة"
+
+        net = "تيستنت 🧪 (أموال وهمية)" if (exchange is None or exchange.testnet) else "حقيقي 🔴"
+
+        if dry:
+            return "\n".join(
+                [
+                    "🧪 <b>وضع المحاكاة مُفعّل</b>",
+                    "",
+                    "لن تُرسل <b>أي أوامر</b> إلى المنصة.",
+                    "الإشارات والتحليل يعملان بشكل حقيقي، لكن التنفيذ وهمي.",
+                    "",
+                    f"{saved} {synced}".strip(),
+                    "",
+                    "للتنفيذ الحقيقي: /live  (أو /set dryrun false)",
+                ]
+            )
+        return "\n".join(
+            [
+                "🔴 <b>التنفيذ الحقيقي مُفعّل</b>",
+                "",
+                f"الشبكة: {net}",
+                "عند ضغط ✅ على أي إشارة يُرسل البوت أمراً <b>فعلياً</b> إلى المنصة،",
+                "مع وقف خسارة وجني أرباح تلقائيين.",
+                "",
+                f"{saved} {synced}".strip(),
+            ]
+        )
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -593,10 +658,19 @@ class TelegramBot:
             self._schedule_scan()
         if key == "topn":
             self.trader.invalidate_symbols()
+        if key == "dryrun":
+            # مهم: تطبيق فوري على كائن المنصة، وإلا تبقى الأوامر محاكاة حتى إعادة التشغيل
+            exchange = getattr(self.trader, "exchange", None)
+            if exchange is not None:
+                exchange.dry_run = bool(value)
 
+        note = "\n🔁 تمت إعادة جدولة الفحص." if key == "interval" else ""
+        if key == "dryrun":
+            note = "\n🧪 الأوامر الآن محاكاة فقط." if value else (
+                "\n🔴 الأوامر الآن <b>حقيقية</b> وتُرسل إلى المنصة فوراً."
+            )
         return True, (
-            f"✅ تم التعديل\n<b>{key}</b>: <code>{old}</code> ← <code>{value}</code>"
-            + ("\n🔁 تمت إعادة جدولة الفحص." if key == "interval" else "")
+            f"✅ تم التعديل\n<b>{key}</b>: <code>{old}</code> ← <code>{value}</code>" + note
         )
 
     # ── /symbols ──
@@ -705,6 +779,8 @@ class TelegramBot:
             "settings": self._settings,
             "pause": self._pause,
             "resume": self._resume,
+            "live": self._live,
+            "dryrun": self._dry_run_mode,
             "help": self._help,
         }[cmd]
         await handler(update, context)
