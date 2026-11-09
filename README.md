@@ -59,6 +59,7 @@ source .venv/bin/activate          # ويندوز: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 > **لا يحتاج أي مكتبة مترجَمة C/C++**: لا `numpy` ولا `pandas` ولا `PyYAML` ولا `ta` —
+> وحتى `pycryptodome` (التي تطلبها مكتبة بينانس) يستمر المشروع بدونها ببديل وهمي،
 > الإعدادات TOML (مكتبة قياسية)، الشموع في حاوية `list` بسيطة،
 > والمؤشرات (RSI / Williams %R / EMA) محسوبة ببايثون خالص.
 > هذا يتفادى أخطاء مثل `DLL load failed` و `Microsoft Visual C++ 14.0 is required`.
@@ -196,6 +197,7 @@ stratig/
 ├── stratig/
 │   ├── config.py               # تحميل config.toml + .env
 │   ├── data.py                 # حاوية الشموع (بدون pandas)
+│   ├── compat.py               # بديل وهمي لـ pycryptodome إن تعذّر تحميلها
 │   ├── utils.py                # أدوات مشتركة
 │   ├── logging_setup.py
 │   ├── exchanges/
@@ -260,6 +262,7 @@ docker compose restart        # بعد تعديل .env
 | `الحد الأدنى لقيمة الصفقة` | ارفع `trade.qty_usdt` (Binance يرفض أقل من ~20 USDT) |
 | لا إشارات لفترة طويلة | طبيعي — التأكيد المزدوج نادر. جرّب `/set tf 5m` أو `/set both false` |
 | `Timestamp for this request...` | اضبط وقت الجهاز (تزامن NTP) |
+| `DLL load failed` مع numpy/pandas | **مُصلح**: لم تعد المشروع يستخدمهما — حدّث بـ `update.bat` ثم احذف `.venv` وأعد `setup.bat` |
 
 ---
 

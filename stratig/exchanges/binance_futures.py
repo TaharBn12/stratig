@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Any
 
+from ..compat import import_module_safely
 from ..data import Candles, make_candles
 from .base import (
     BUY,
@@ -52,7 +53,8 @@ class BinanceFutures(ExchangeBase):
         dry_run: bool = False,
     ):
         from binance.error import ClientError  # noqa: F401  (يُستخدم في except)
-        from binance.um_futures import UMFutures
+
+        UMFutures = import_module_safely("binance.um_futures", "UMFutures")
 
         self.api_key = api_key or ""
         self.api_secret = api_secret or ""
