@@ -1,0 +1,23 @@
+# التشغيل كخدمة على سيرفر (systemd)
+# 1) انسخ الملف:  sudo cp stratig-bot.service /etc/systemd/system/
+# 2) عدّل المسارات والمستخدم أدناه
+# 3) ثم: sudo systemctl daemon-reload && sudo systemctl enable --now stratig
+
+[Unit]
+Description=Stratig Telegram Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stratig
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/stratig/.venv/bin/python /home/ubuntu/stratig/main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/stratig/logs/systemd.log
+StandardError=append:/home/ubuntu/stratig/logs/systemd.log
+
+[Install]
+WantedBy=multi-user.target

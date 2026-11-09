@@ -1,0 +1,15 @@
+services:
+  stratig:
+    build: .
+    container_name: stratig
+    restart: unless-stopped
+    # كل الأسرار تُقرأ من ملف .env (لا تضعها هنا)
+    env_file:
+      - .env
+    environment:
+      TZ: UTC
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # config.yaml قابل للكتابة لأن البوت يحفظ الإعدادات عند استخدام /set
+      - ./config.yaml:/app/config.yaml
+      - ./logs:/app/logs
