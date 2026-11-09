@@ -14,7 +14,6 @@ import sys
 
 from stratig.bot.telegram_bot import TelegramBot
 from stratig.config import Config, Secrets
-from stratig.utils import ALLOWED_TIMEFRAMES, is_supported_timeframe, normalize_timeframe
 from stratig.exchanges import build_exchange
 from stratig.logging_setup import setup_logging
 from stratig.services.trader import Trader
@@ -97,20 +96,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         source = f"ملف الإعدادات ({args.config}: safety.dry_run = {file_dry})"
 
-    # ── التحقق من الإطار الزمني: قيمة مرفوضة = صفر إشارات بلا أي خطأ ظاهر ──
-    raw_tf = config.get("strategy.timeframe", "15m")
-    tf = normalize_timeframe(raw_tf)
-    if not is_supported_timeframe(tf):
-        log.error(
-            "الإطار الزمني \"%s\" غير مدعوم من المنصة. المسموح: %s",
-            raw_tf, ", ".join(ALLOWED_TIMEFRAMES),
-        )
-        return 2
-    if tf != str(raw_tf):
-        log.warning("تم توحيد الإطار الزمني: %s → %s", raw_tf, tf)
-        config.set("strategy.timeframe", tf)
+    # قيمة إطار مرفوضة كانت توقف البوت أو تمرّ بصمت → نُصحّحها ونكمل
+    tf_note = config.ensure_timeframe()
 
     setup_logging(args.log_level)
+    if tf_note:
+        log.warning(tf_note)
 
     if args.check:
         return check_connection(config, secrets)

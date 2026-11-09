@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.config import Config, Secrets  # noqa: E402
+from stratig.utils import normalize_timeframe  # noqa: E402
 from stratig.data import make_candles  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
@@ -495,3 +496,37 @@ def test_timeframe_is_read_per_scan(tmp_path):
     trader.pending.clear()
     asyncio.run(trader.scan_once())
     assert "1h" in seen
+
+
+# ═══════════════════ الإطار الزمني: لا يُوقف البوت أبداً ═══════════════════
+def test_bare_number_prefers_supported_interval():
+    """"4" ليست إطار دقائق مقبولاً → تُفهم كساعات (4h) بدل إيقاف البوت."""
+    assert normalize_interval("4") == "4h"
+    assert normalize_interval("6") == "6h"
+    assert normalize_interval("24") == "1d"
+    assert normalize_interval("15") == "15m"      # 15m موجود → دقائق
+    assert normalize_interval("5") == "5m"
+    assert interval_to_minutes("4") == 240
+
+
+def test_ensure_timeframe_converts_four_to_hours(tmp_path):
+    cfg = Config({"strategy": {"timeframe": "4"}}, path=tmp_path / "config.toml")
+    note = cfg.ensure_timeframe()
+    assert cfg.get("strategy.timeframe") == "4h"
+    assert "4h" in note
+
+
+def test_ensure_timeframe_repairs_unsupported_value(tmp_path):
+    """قيمة لا تقبلها أي منصة تُصحَّح تلقائياً بدل إنهاء البرنامج."""
+    cfg = Config({"strategy": {"timeframe": "7m"}}, path=tmp_path / "config.toml")
+    note = cfg.ensure_timeframe()
+    assert cfg.get("strategy.timeframe") == "15m"
+    assert "غير مدعوم" in note
+    cfg2 = Config.load(tmp_path / "config.toml")
+    assert cfg2.get("strategy.timeframe") == "15m"      # وحُفظ التصحيح
+
+
+def test_ensure_timeframe_silent_when_valid(tmp_path):
+    cfg = Config({"strategy": {"timeframe": "1h"}}, path=tmp_path / "config.toml")
+    assert cfg.ensure_timeframe() == ""
+    assert cfg.get("strategy.timeframe") == "1h"
