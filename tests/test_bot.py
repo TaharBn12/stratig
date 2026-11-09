@@ -138,7 +138,7 @@ def test_commands_registered():
         if isinstance(handler, CommandHandler)
         for command in handler.commands
     }
-    for expected in ("start", "status", "scan", "scanall", "set", "closeall"):
+    for expected in ("start", "status", "scan", "scanall", "set", "closeall", "data", "protect"):
         assert expected in commands
 
 
@@ -159,3 +159,50 @@ def test_scan_summary_normal_case_has_no_warning():
     summary = asyncio.run(bot._scan_summary(found))
     assert "قليل جداً" not in summary
     assert "كل العملات" in summary
+
+
+def test_protect_reports_unprotected_positions():
+    """/protect يكشف الصفقات التي بلا وقف خسارة على المنصة."""
+    from stratig.exchanges.base import Position
+
+    bot, trader, exchange = make_bot()
+    exchange.set_positions([
+        Position(symbol="AAAUSDT", side="buy", size=0.001, entry_price=30000.0,
+                 mark_price=30100.0, leverage=10),
+    ])
+
+    edits: list[str] = []
+
+    class FakeMsg:
+        async def edit_text(self, text, **kwargs):
+            edits.append(text)
+
+    class Update:
+        class effective_message:
+            @staticmethod
+            async def reply_text(text, **kwargs):
+                return FakeMsg()
+
+    asyncio.run(bot._protect.__wrapped__(bot, Update(), None))
+    assert edits and "AAAUSDT" in edits[0]
+    assert "\u274c" in edits[0]              # بلا وقف خسارة → تحذير
+
+
+def test_protect_reports_no_positions():
+    bot, _, exchange = make_bot()
+    exchange.set_positions([])
+
+    edits: list[str] = []
+
+    class FakeMsg:
+        async def edit_text(self, text, **kwargs):
+            edits.append(text)
+
+    class Update:
+        class effective_message:
+            @staticmethod
+            async def reply_text(text, **kwargs):
+                return FakeMsg()
+
+    asyncio.run(bot._protect.__wrapped__(bot, Update(), None))
+    assert edits and "لا توجد صفقات" in edits[0]

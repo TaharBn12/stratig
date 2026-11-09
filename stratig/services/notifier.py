@@ -2,10 +2,18 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
 log = logging.getLogger(__name__)
+
+_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
+
+
+def strip_tags(text: str) -> str:
+    """يزيل وسوم HTML — ملاذ أخير إن رفض تليجرام تنسيق الرسالة."""
+    return _TAG_RE.sub("", str(text))
 
 
 @dataclass
@@ -64,7 +72,7 @@ class TelegramNotifier(Notifier):
 
     async def send(self, text, buttons=None, chat_id=None):
         from telegram.constants import ParseMode
-        from telegram.error import TelegramError
+        from telegram.error import BadRequest, TelegramError
 
         targets = [chat_id] if chat_id else self.chat_ids
         if not targets:
@@ -81,13 +89,26 @@ class TelegramNotifier(Notifier):
                     disable_web_page_preview=True,
                 )
                 ref = MessageRef(chat_id=msg.chat_id, message_id=msg.message_id)
+            except BadRequest as err:
+                # غالباً وسوم HTML غير صالحة (Can't parse entities) — نعيد كنص عادي
+                log.warning("تعذّر إرسال الرسالة بتنسيق HTML (%s) — إعادة الإرسال كنص", err)
+                try:
+                    msg = await self.bot.send_message(
+                        chat_id=cid,
+                        text=strip_tags(text),
+                        reply_markup=self._keyboard(buttons),
+                        disable_web_page_preview=True,
+                    )
+                    ref = MessageRef(chat_id=msg.chat_id, message_id=msg.message_id)
+                except TelegramError as err2:
+                    log.error("فشل الإرسال إلى %s: %s", cid, err2)
             except TelegramError as err:
                 log.error("فشل الإرسال إلى %s: %s", cid, err)
         return ref
 
     async def edit(self, ref, text, buttons=None):
         from telegram.constants import ParseMode
-        from telegram.error import TelegramError
+        from telegram.error import BadRequest, TelegramError
 
         if not ref or not ref.message_id:
             return
@@ -100,5 +121,17 @@ class TelegramNotifier(Notifier):
                 reply_markup=self._keyboard(buttons),
                 disable_web_page_preview=True,
             )
+        except BadRequest as err:
+            log.warning("تعذّر تعديل الرسالة بتنسيق HTML (%s) — إعادة كنص", err)
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=ref.chat_id,
+                    message_id=ref.message_id,
+                    text=strip_tags(text),
+                    reply_markup=self._keyboard(buttons),
+                    disable_web_page_preview=True,
+                )
+            except TelegramError as err2:
+                log.warning("تعذّر تعديل الرسالة: %s", err2)
         except TelegramError as err:
             log.warning("تعذّر تعديل الرسالة: %s", err)

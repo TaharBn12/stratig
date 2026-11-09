@@ -96,6 +96,8 @@ python main.py             # تشغيل البوت
 | `/pause` · `/resume` | إيقاف / تشغيل الفحص التلقائي |
 | `/close BTCUSDT` | إغلاق صفقة رمز محدد |
 | `/closeall` | إغلاق كل الصفقات (مع تأكيد) |
+| `/data` | تحقّق أن الشموع حقيقية (المنصة، الرابط، عمر آخر شمعة) |
+| `/protect` | هل كل صفقة مفتوحة عليها وقف خسارة فعلي في المنصة؟ |
 | `/id` | معرّف محادثتك (لإضافته للقائمة البيضاء) |
 | `/help` | كل الأوامر |
 
@@ -185,6 +187,16 @@ python scripts/verify_data_source.py
 - TP/SL تُوضع كأوامر `TAKE_PROFIT_MARKET` / `STOP_MARKET` مع `closePosition=true`
   (أي تغلق كامل الصفقة تلقائياً عند التحقيق).
 - إن فشل وضع **وقف الخسارة** → يُغلق المركز فوراً حمايةً للمال.
+
+> ⚠️ **تغيير Binance (ساري منذ 2025-12-09):** الأوامر الشرطية انتقلت من
+> `POST /fapi/v1/order` إلى **`POST /fapi/v1/algoOrder`**، واسم حقل سعر
+> الإطلاق تغيّر من `stopPrice` إلى **`triggerPrice`**. الإرسال للنقطة القديمة
+> يُرجع `-4120 Order type not supported for this endpoint` وتُفتح الصفقة
+> بلا حماية. هذا المشروع يستخدم النقطة الجديدة (مع محاولة احتياطية
+> بـ `quantity + reduceOnly` إن رُفض `closePosition`)، ويلغي الأوامر الشرطية
+> عبر `DELETE /fapi/v1/algoOrder` عند إغلاق الصفقة حتى لا تُفتح صفقة لاحقاً
+> بالخطأ. للتحقق بنفسك: `/protect` أو
+> `.venv\Scripts\python.exe scripts\check_protection.py`
 
 ### أهم الإعدادات (config.toml)
 | المسار | الافتراضي | المعنى |
@@ -306,6 +318,9 @@ docker compose restart        # بعد تعديل .env
 | `Timestamp for this request...` | اضبط وقت الجهاز (تزامن NTP) |
 | `DLL load failed` مع numpy/pandas | **مُصلح**: لم تعد المشروع يستخدمهما — حدّث بـ `update.bat` ثم احذف `.venv` وأعد `setup.bat` |
 | `PTBUserWarning: No JobQueue set up` | الفحص التلقائي لن يعمل. أعد تشغيل `setup.bat` لتثبيت `apscheduler` (وإلا يعمل البوت بحلقة فحص داخلية بديلة) |
+| `(-4120) Order type not supported for this endpoint` | **مُصلح**: نقلت Binance الأوامر الشرطية إلى نقطة Algo — حدّث بـ `update.bat` |
+| `Can't parse entities: unsupported start tag` | **مُصلح**: رموز `<` و `>` في أسباب المؤشرات تُهرَّب الآن، وإن فشل التنسيق يُعاد الإرسال كنص عادي |
+| `maximum number of running instances reached` | مجرد تحذير: دورة فحص سابقة لم تنتهِ. ارفع المدة بـ `/set interval 300` |
 
 ---
 
