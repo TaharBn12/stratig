@@ -354,3 +354,52 @@ def test_scan_stops_at_max_positions_without_extra_requests(tmp_path):
     found = asyncio.run(trader.scan_once(manual=True, symbols=ex.symbols))
     assert len(found) == 2                       # توقف عند max_positions
     assert calls["positions"] <= 2               # طلب واحد في البداية (وليس 3)
+
+
+# ═══════════════════════ مصدر قائمة الرموز ═══════════════════════
+def test_symbols_source_property(tmp_path):
+    trader, ex = make_trader(tmp_path, scanner__symbols_source="manual")
+    assert trader.symbols_source == "manual"
+
+    trader.cfg.set("scanner.symbols_source", "auto")
+    trader.cfg.set("scanner.top_n", 40)
+    assert trader.symbols_source == "auto"
+
+    trader.cfg.set("scanner.top_n", 0)
+    assert trader.symbols_source == "all"
+
+
+def test_empty_manual_list_falls_back_to_all(tmp_path):
+    """قائمة يدوية فارغة لا تعني 'فحص صفر رموز'."""
+    trader, ex = make_trader(tmp_path, scanner__symbols_source="manual",
+                            scanner__manual_symbols=[])
+    ex.symbols = ["AAAUSDT", "BBBUSDT"]
+    assert trader.symbols() == ["AAAUSDT", "BBBUSDT"]
+
+
+def test_use_auto_symbols_all_sets_topn_zero(tmp_path):
+    trader, ex = make_trader(tmp_path, scanner__symbols_source="manual", scanner__top_n=40)
+    trader.use_auto_symbols(all_symbols=True)
+    assert trader.cfg.get("scanner.symbols_source") == "auto"
+    assert trader.cfg.get("scanner.top_n") == 0
+    assert trader.symbols_source == "all"
+
+
+def test_add_symbol_to_tiny_manual_list_keeps_others(tmp_path):
+    """الإضافة إلى قائمة يدوية شبه فارغة يجب ألا تحذف بقية السوق."""
+    trader, ex = make_trader(tmp_path, scanner__symbols_source="manual",
+                            scanner__manual_symbols=["AAAUSDT"])
+    ex.symbols = ["AAAUSDT", "BBBUSDT", "CCCUSDT"]
+    trader.add_symbol("DDDUSDT")
+    current = trader.symbols()
+    assert "DDDUSDT" in current
+    assert len(current) >= 3
+
+
+def test_scan_records_source(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    asyncio.run(trader.scan_once(manual=True))
+    assert trader.last_scan_source == "manual"
+    ex.symbols = ["AAAUSDT", "BBBUSDT"]
+    asyncio.run(trader.scan_once(manual=True, all_symbols=True))
+    assert trader.last_scan_source == "all"
