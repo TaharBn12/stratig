@@ -46,6 +46,7 @@ class BybitFutures(ExchangeBase):
         self.dry_run = bool(dry_run)
         self.name = "bybit-testnet" if testnet else "bybit"
         self.session = HTTP(api_key=api_key or "", api_secret=api_secret or "", testnet=testnet)
+        self.api_url = "https://api-testnet.bybit.com" if testnet else "https://api.bybit.com"
 
     # ═══════════════════ بيانات السوق ═══════════════════
     def symbol_info(self, symbol: str) -> SymbolInfo:
