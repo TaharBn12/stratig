@@ -1,73 +1,62 @@
-# ═══════════════════════════════════════════════════════════════
-#  إعدادات بوت Stratig
-#  عدّل هذا الملف بأي محرر نصوص، أو من تليجرام عبر /set (يُحفظ تلقائياً هنا)
-#  المفاتيح السرية تأتي من ملف .env فقط — لا تضعها هنا
-# ═══════════════════════════════════════════════════════════════
 
 [exchange]
-# binance (افتراضي — عقود USDT-M) | bybit
 name = "binance"
-# true = تيستنت بأموال وهمية | false = تداول حقيقي
 testnet = true
 
 [strategy]
-timeframe = "15m"          # 1m 3m 5m 15m 30m 1h 2h 4h ...
-candles = 500              # عدد الشموع المطلوبة من المنصة
-use_closed_candles = true  # true = الحساب على شمعة مكتملة (أدق، بدون إعادة رسم)
-require_both = true        # true = تأكيد مزدوج: RSI و Williams %R يجب أن يتفقا
+timeframe = "15m"
+candles = 500
+use_closed_candles = false
+require_both = true
 
 [strategy.rsi]
 enabled = true
 period = 14
 oversold = 30
 overbought = 70
-# نمط آخر 3 شموع: شمعتان تحت 30 ثم اختراق للأعلى = شراء (والعكس للبيع)
 lookback = 3
 
 [strategy.williams_r]
 enabled = true
-lbp = 24                   # فترة Williams %R
-ema_window = 24            # EMA على المؤشر لالتقاط التقاطع
+lbp = 24
+ema_window = 24
 extreme_oversold = -99.5
 extreme_overbought = -0.5
-oversold = -75             # تقاطع صاعد من تحت -75
-overbought = -25           # تقاطع هابط من فوق -25
+oversold = -75
+overbought = -25
 
 [trade]
 order_type = "market"
-qty_usdt = 50              # حجم الصفقة بالدولار
+qty_usdt = 50
 leverage = 10
-margin_mode = "isolated"   # isolated | cross
-take_profit_pct = 0.012    # +1.2%
-stop_loss_pct = 0.009      # -0.9%
-tp_trigger = "mark_price"  # mark_price | last_price  (Binance فقط)
+margin_mode = "isolated"
+take_profit_pct = 0.02
+stop_loss_pct = 0.009
+tp_trigger = "mark_price"
 
 [risk]
-max_positions = 5          # أقصى عدد صفقات مفتوحة
-min_notional = 20          # الحد الأدنى لقيمة الصفقة (Binance يرفض أقل من ~20)
-daily_max_trades = 0       # 0 = غير محدود
-daily_max_loss_usdt = 0    # 0 = غير محدود (يوقف الفتح عند تجاوز الخسارة اليومية)
+max_positions = 5
+min_notional = 20
+daily_max_trades = 0
+daily_max_loss_usdt = 0
 
 [scanner]
-autostart = true           # يبدأ الفحص تلقائياً عند التشغيل
-interval_seconds = 120     # كل كم ثانية يتم فحص السوق
-symbols_source = "auto"    # auto = كل/أعلى الرموز نشاطاً | manual = القائمة اليدوية
-top_n = 0                  # 0 = فحص كل العملات | أي رقم = أعلى N رمز نشاطاً
-max_signals_per_scan = 5   # أقصى إشارات في الفحص الواحد (يمنع فيض الرسائل)
-manual_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+autostart = true
+interval_seconds = 120
+symbols_source = "manual"
+top_n = 40
+max_signals_per_scan = 5
+manual_symbols = ["AAAUSDT"]
 exclude = ["USDCUSDT", "FDUSDUSDT"]
-cooldown_seconds = 1800    # فترة سمومية لكل رمز بعد إشارة (تمنع تكرار التنبيه)
-signal_ttl_seconds = 900   # مدة صلاحية الإشارة قبل أن تنتهي تلقائياً
-request_delay = 0.2        # تأخير بين طلبات المنصة (احترام حدود المعدل)
-notify_no_signal = false   # إرسال رسالة "لا توجد إشارات" بعد كل فحص
+cooldown_seconds = 1800
+signal_ttl_seconds = 900
+request_delay = 0.2
+notify_no_signal = false
 
 [execution]
-# manual = البوت يقترح وأنت تؤكد من تليجرام (الافتراضي)
-# auto   = يفتح الصفقات تلقائياً دون تأكيد
 mode = "manual"
 
 [safety]
-# true = محاكاة: لا تُرسل أوامر حقيقية، فقط يطبعها وينبهك
 dry_run = false
 
 [telegram]

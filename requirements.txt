@@ -9,6 +9,9 @@
 
 # --- Telegram ---
 python-telegram-bot>=22.0,<23
+# مهم للفحص الدوري التلقائي (JobQueue) — مكتبة بايثون خالصة، لا تحتاج مصنّف
+# وإن لم تُثبّت، يعمل البوت بحلقة فحص داخلية بديلة
+apscheduler>=3.10.4,<3.12
 
 # --- Exchanges ---
 binance-futures-connector>=4.0      # Binance USDT-M Futures (يدعم التيستنت)

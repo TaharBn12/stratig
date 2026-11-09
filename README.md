@@ -71,6 +71,9 @@ python main.py             # تشغيل البوت
 ```
 افتح تليجرام وأرسل للبوت: `/start`
 
+> تأكد في اللوج من ظهور: `تم جدولة الفحص التلقائي كل 120 ثانية`.
+> إن ظهر بدلاً منها `No JobQueue set up` أعد تشغيل `setup.bat` لتثبيت `apscheduler`.
+
 > جرّب أولاً: `python main.py --dry-run` (محاكاة كاملة بدون أوامر)،
 > أو `python scripts/demo_scan.py` (عرض توضيحي على بيانات اصطناعية بدون إنترنت).
 
@@ -273,6 +276,7 @@ docker compose restart        # بعد تعديل .env
 | لا إشارات لفترة طويلة | طبيعي — التأكيد المزدوج نادر. جرّب `/set tf 5m` أو `/set both false` |
 | `Timestamp for this request...` | اضبط وقت الجهاز (تزامن NTP) |
 | `DLL load failed` مع numpy/pandas | **مُصلح**: لم تعد المشروع يستخدمهما — حدّث بـ `update.bat` ثم احذف `.venv` وأعد `setup.bat` |
+| `PTBUserWarning: No JobQueue set up` | الفحص التلقائي لن يعمل. أعد تشغيل `setup.bat` لتثبيت `apscheduler` (وإلا يعمل البوت بحلقة فحص داخلية بديلة) |
 
 ---
 
