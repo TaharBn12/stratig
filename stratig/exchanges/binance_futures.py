@@ -14,6 +14,7 @@ from typing import Any
 
 from ..compat import import_module_safely
 from ..data import Candles, make_candles
+from .time_sync import TimeSync, server_time_from
 from .base import (
     BUY,
     SELL,
@@ -88,6 +89,14 @@ class BinanceFutures(ExchangeBase):
         self._info_ts = 0.0
         self._dual_side: bool | None = None
 
+        # مزامنة التوقيت: تمنع (400, -1021) "Timestamp ... ahead of the server's time"
+        self.time_sync = TimeSync(server_time_from(lambda: self.client))
+        try:
+            self.time_sync.sync(force=True)
+            self.time_sync.patch_connector()
+        except Exception as err:  # لا نُسقط البوت إن تعذّر جلب توقيت المنصة
+            log.debug("تعذّرت مزامنة التوقيت عند الإقلاع: %s", err)
+
     # ═══════════════════ أدوات داخلية ═══════════════════
     def _rw(self) -> dict:
         return {"recvWindow": self.recv_window}
@@ -95,6 +104,31 @@ class BinanceFutures(ExchangeBase):
     def _ignorable(self, err: Exception) -> bool:
         code = getattr(err, "error_code", None)
         return code in IGNORED_ERRORS
+
+    # ═══════════════════ التوقيت ═══════════════════
+    @property
+    def time_drift_ms(self) -> int:
+        """فرق التوقيت بين الجهاز والمنصة (موجب = جهازك متأخّر)."""
+        return self.time_sync.drift_ms
+
+    def sync_time(self, force: bool = True) -> int:
+        """يعيد مزامنة التوقيت مع المنصة ويُرجع الفرق جديداً."""
+        offset = self.time_sync.sync(force=force)
+        self.time_sync.patch_connector()
+        return offset
+
+    def _api(self, name: str, **kwargs):
+        """نداء موقّع مع إعادة محاولة تلقائية عند خطأ التوقيت ‎-1021‎."""
+        self.time_sync.maybe_sync()
+        func = getattr(self.client, name)
+        try:
+            return func(**kwargs)
+        except Exception as err:
+            if getattr(err, "error_code", None) != -1021:
+                raise
+        log.warning("[%s] خطأ توقيت (-1021) — إعادة المزامنة ثم المحاولة مرة أخرى", name)
+        self.sync_time(force=True)
+        return func(**kwargs)
 
     def exchange_info(self, force: bool = False) -> dict:
         """معلومات كل الرموز مع تخزين مؤقت لساعة."""
@@ -179,7 +213,7 @@ class BinanceFutures(ExchangeBase):
 
     # ═══════════════════ الحساب ═══════════════════
     def balance(self) -> Balance:
-        resp = self.client.balance(**self._rw())
+        resp = self._api("balance", **self._rw())
         for asset in resp:
             if asset.get("asset") == "USDT":
                 total = float(asset.get("balance", 0) or 0)
@@ -189,7 +223,7 @@ class BinanceFutures(ExchangeBase):
         raise ExchangeError("لم يتم العثور على رصيد USDT")
 
     def positions(self) -> list[Position]:
-        resp = self.client.get_position_risk(**self._rw())
+        resp = self._api("get_position_risk", **self._rw())
         out: list[Position] = []
         for item in resp:
             try:
@@ -227,7 +261,7 @@ class BinanceFutures(ExchangeBase):
             if since_ms:
                 params["startTime"] = int(since_ms)
             params.update(self._rw())
-            resp = self.client.get_income_history(**params)
+            resp = self._api("get_income_history", **params)
             return round(sum(float(x.get("income", 0) or 0) for x in resp), 4)
         except Exception as err:
             log.warning("تعذّر جلب سجل الأرباح: %s", err)
@@ -236,15 +270,18 @@ class BinanceFutures(ExchangeBase):
     # ═══════════════════ إعدادات الرمز ═══════════════════
     def set_leverage(self, symbol: str, leverage: int) -> None:
         try:
-            self.client.change_leverage(symbol=symbol, leverage=int(leverage), **self._rw())
+            self._api("change_leverage", symbol=symbol, leverage=int(leverage), **self._rw())
         except Exception as err:
             if not self._ignorable(err):
                 log.warning("[%s] تعذّر ضبط الرافعة: %s", symbol, err)
 
     def set_margin_mode(self, symbol: str, margin_mode: str) -> None:
         try:
-            self.client.change_margin_type(
-                symbol=symbol, marginType=str(margin_mode).upper(), **self._rw()
+            self._api(
+                "change_margin_type",
+                symbol=symbol,
+                marginType=str(margin_mode).upper(),
+                **self._rw(),
             )
         except Exception as err:
             if not self._ignorable(err):
@@ -255,10 +292,10 @@ class BinanceFutures(ExchangeBase):
         if self._dual_side is not None:
             return
         try:
-            resp = self.client.get_position_mode(**self._rw())
+            resp = self._api("get_position_mode", **self._rw())
             self._dual_side = bool(resp.get("dualSidePosition"))
             if self._dual_side:
-                self.client.change_position_mode(dualSidePosition=False, **self._rw())
+                self._api("change_position_mode", dualSidePosition=False, **self._rw())
                 self._dual_side = False
                 log.info("تم تحويل الحساب إلى وضع One-Way")
         except Exception as err:
@@ -277,8 +314,15 @@ class BinanceFutures(ExchangeBase):
         """نداء REST موقّع — عبر موصّل Binance إن توفّر، وإلا توقيع يدوي."""
         payload: dict[str, Any] = {k: v for k, v in (params or {}).items() if v is not None}
         payload.update(self._rw())
+        self.time_sync.maybe_sync()
         sign_request = getattr(self.client, "sign_request", None)
         if callable(sign_request):
+            try:
+                return sign_request(method, path, payload)
+            except Exception as err:
+                if getattr(err, "error_code", None) != -1021:
+                    raise
+            self.sync_time(force=True)
             return sign_request(method, path, payload)
         return self._sign_manually(method, path, payload)
 
@@ -290,7 +334,7 @@ class BinanceFutures(ExchangeBase):
 
         request = import_module_safely("requests", "request")
         params = dict(payload)
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = self.time_sync.now()
         query = urllib.parse.urlencode(params, doseq=True)
         signature = hmac.new(
             self.api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256
@@ -434,7 +478,8 @@ class BinanceFutures(ExchangeBase):
         self.set_leverage(symbol, leverage)
 
         order_side = "BUY" if side == BUY else "SELL"
-        resp = self.client.new_order(
+        resp = self._api(
+            "new_order",
             symbol=symbol,
             side=order_side,
             type="MARKET",
@@ -449,7 +494,7 @@ class BinanceFutures(ExchangeBase):
             # أوامر الماركت قد تُرجع avgPrice=0 في الرد الأول
             time.sleep(0.8)
             try:
-                q = self.client.query_order(symbol=symbol, orderId=resp["orderId"], **self._rw())
+                q = self._api("query_order", symbol=symbol, orderId=resp["orderId"], **self._rw())
                 fill_price = float(q.get("avgPrice") or 0) or price
             except Exception:  # نبقى على سعر المارك
                 pass
@@ -547,7 +592,7 @@ class BinanceFutures(ExchangeBase):
         if not pos:
             return None
         try:
-            self.client.cancel_open_orders(symbol=symbol, **self._rw())
+            self._api("cancel_open_orders", symbol=symbol, **self._rw())
         except Exception as err:
             log.debug("[%s] لا توجد أوامر معلقة للإلغاء: %s", symbol, err)
         # أوامر الوقف/الهدف تعيش على نقطة Algo ولا تلغيها cancel_open_orders؛
@@ -560,7 +605,8 @@ class BinanceFutures(ExchangeBase):
         qty = round_step(pos.size, info.step_size) or pos.size
         if self.dry_run:
             return OrderResult(symbol=symbol, side=close_side.lower(), qty=qty, price=pos.mark_price, simulated=True)
-        resp = self.client.new_order(
+        resp = self._api(
+            "new_order",
             symbol=symbol,
             side=close_side,
             type="MARKET",

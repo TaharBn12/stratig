@@ -478,6 +478,9 @@ class TelegramBot:
         ]
         if exchange.testnet:
             lines += ["", "ℹ️ الأسعار من السوق التجريبي لBinance، والأموال وهمية."]
+        drift = getattr(exchange, "time_sync", None)
+        if drift is not None:
+            lines += ["", f"🕒 التوقيت: {fmt.esc(drift.describe())}"]
         if age > 90:
             lines += ["", "⚠️ آخر شمعة قديمة — تحقّق من اتصال الإنترنت."]
         await msg.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
