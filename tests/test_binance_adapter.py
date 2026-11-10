@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.exchanges.base import ExchangeError  # noqa: E402
 from stratig.exchanges.binance_futures import BinanceFutures  # noqa: E402
+from stratig.exchanges.time_sync import TimeSync  # noqa: E402
 
 EXCHANGE_INFO = {
     "symbols": [
@@ -59,14 +60,32 @@ TICKERS = [
 ]
 
 
+class _ClientError(Exception):
+    """يحاكي binance.error.ClientError (يحمل error_code)."""
+
+    def __init__(self, code: int, message: str):
+        super().__init__(f"({code}, {message})")
+        self.error_code = code
+        self.error_message = message
+
+
 class FakeClient:
     """يحاكي binance.um_futures.UMFutures ويسجّل كل نداء."""
 
-    def __init__(self, price: float = 30000.0, fail_stop_loss: bool = False):
+    def __init__(self, price: float = 30000.0, fail_stop_loss: bool = False,
+                 server_offset_ms: int = 0, fail_timestamp_once: bool = False):
         self.price = price
         self.fail_stop_loss = fail_stop_loss
+        self.server_offset_ms = server_offset_ms      # المنصة متقدّمة علينا بهذا المقدار
+        self.fail_timestamp_once = fail_timestamp_once
+        self.time_calls = 0
         self.calls: list[tuple] = []
         self.amounts = {"BTCUSDT": "0", "ETHUSDT": "-2"}   # positionAmt لكل رمز
+
+    def time(self, **kwargs):
+        import time as _t
+        self.time_calls += 1
+        return {"serverTime": int(_t.time() * 1000) + self.server_offset_ms}
 
     # بيانات السوق
     def exchange_info(self):
@@ -84,6 +103,10 @@ class FakeClient:
 
     # الحساب
     def balance(self, **kwargs):
+        if self.fail_timestamp_once and not getattr(self, "_ts_failed", False):
+            self._ts_failed = True
+            raise _ClientError(-1021, "Timestamp for this request was 1000ms ahead "
+                                      "of the server's time.")
         return [
             {"asset": "USDT", "balance": "1000.0", "availableBalance": "950.0", "crossUnPnl": "5.0"},
             {"asset": "BNB", "balance": "1.0", "availableBalance": "1.0", "crossUnPnl": "0"},
@@ -379,3 +402,74 @@ def test_cancel_algo_orders_survives_api_error():
         RuntimeError("network down")
     )
     assert ex.cancel_algo_orders("BTCUSDT") == 0
+
+
+# ═══════════════════════ مزامنة التوقيت (-1021) ═══════════════════════
+def test_time_sync_measures_drift():
+    """ساعة الجهاز متقدّمة 3 ثوانٍ عن المنصة → يجب أن نرسل توقيتاً أقل."""
+    import time as _t
+
+    sync = TimeSync(lambda: int(_t.time() * 1000) - 3_000)
+    sync.sync(force=True)
+    assert sync.drift_ms == pytest.approx(-3_000, abs=50)
+    assert sync.now() < int(_t.time() * 1000)      # لا نتقدّم على المنصة أبداً
+    assert "يُصحَّح" in sync.describe()
+
+
+def test_time_sync_uses_server_time_when_behind():
+    import time as _t
+
+    sync = TimeSync(lambda: int(_t.time() * 1000) + 5_000)
+    sync.sync(force=True)
+    assert sync.drift_ms == pytest.approx(5_000, abs=50)
+    assert sync.now() > int(_t.time() * 1000)
+
+
+def test_time_sync_survives_network_error():
+    def boom():
+        raise RuntimeError("no network")
+
+    sync = TimeSync(boom)
+    assert sync.sync(force=True) == 0
+    assert sync.synced is False
+    assert "no network" in sync.describe()
+
+
+def test_connector_timestamp_is_patched():
+    """كل طلبات الموصّل يجب أن تحمل التوقيت المُصحَّح."""
+    import time as _t
+
+    sync = TimeSync(lambda: int(_t.time() * 1000) - 2_000)
+    sync.sync(force=True)
+    patched = sync.patch_connector()
+    assert patched >= 1
+    import binance.api as binance_api
+
+    assert binance_api.get_timestamp() < int(_t.time() * 1000)
+
+
+def test_api_retries_after_minus_1021():
+    """الرصيد يفشل بـ -1021 ثم ينجح بعد إعادة المزامنة."""
+    ex = make_exchange(fail_timestamp_once=True)
+    before = ex.client.time_calls
+    bal = ex.balance()
+    assert bal.total == 1000.0
+    assert ex.client.time_calls > before          # أُعيدت المزامنة
+    assert ex.time_sync.synced
+
+
+def test_other_errors_are_not_retried():
+    ex = make_exchange()
+
+    def boom(**kwargs):
+        raise _ClientError(-2019, "Margin is insufficient")
+
+    ex.client.balance = boom
+    with pytest.raises(_ClientError):
+        ex.balance()
+
+
+def test_exchange_exposes_drift():
+    ex = make_exchange(server_offset_ms=4_000)
+    ex.sync_time(force=True)
+    assert ex.time_drift_ms == pytest.approx(4_000, abs=50)
