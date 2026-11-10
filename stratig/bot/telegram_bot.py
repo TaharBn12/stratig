@@ -74,6 +74,10 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "tf": ("strategy.timeframe", "str", "الإطار الزمني — مثال: 15m أو 1h"),
     "strategy": ("strategy.name", "choice:rsi_williams,scalping_i", "الاستراتيجية المستخدمة"),
     "exit": ("exit.mode", "choice:percent,atr", "مخارج الصفقة: نسب ثابتة أم ATR"),
+    "follow_exit": ("exit.follow_strategy", "bool",
+                    "الصرامة: مخارج الاستراتيجية تطغى على exit.mode (true / false)"),
+    "strict": ("exit.strict", "bool",
+               "الصرامة: ارفض فتح صفقة بمخارج لا تنتمي للاستراتيجية (true / false)"),
     "interval": ("scanner.interval_seconds", "int", "مدة الفحص بالثواني — مثال: 120"),
     "ttl": ("scanner.signal_ttl_seconds", "int", "مدة صلاحية الإشارة بالثواني — مثال: 900"),
     "cooldown": ("scanner.cooldown_seconds", "int", "فترة السمومية لكل رمز بالثواني — مثال: 1800"),
@@ -174,6 +178,9 @@ class TelegramBot:
         self.app.add_error_handler(self._on_error)
 
     async def _post_init(self, app) -> None:
+        # صرامة: تحقّق من اتساق الإعدادات مع الاستراتيجية قبل أول فحص
+        for note in self.trader.validate_strategy_config():
+            log.warning("إعدادات الاستراتيجية: %s", note.replace("<code>", "").replace("</code>", ""))
         self.trader.attach_notifier(TelegramNotifier(app.bot, list(self.known)))
         self._schedule_scan()
         if not self.known:
@@ -209,16 +216,23 @@ class TelegramBot:
                          "(للتنفيذ الحقيقي: /live)")
         else:
             exec_line = "التنفيذ: 🔴 <b>أوامر حقيقية</b> تُرسل إلى المنصة"
+        strategy = self.trader.strategy
+        exit_ar = "ATR" if strategy.exit_mode == "atr" else "نسب ثابتة"
+        warnings = list(getattr(self.trader, "strategy_warnings", []))
         return "\n".join(
             [
                 "🚀 <b>بوت Stratig يعمل الآن</b>",
                 "",
                 f"المنصة: <code>{fmt.esc(self.trader.exchange.name)}</code> — {net}",
-                f"الاستراتيجية: RSI + Williams %R (تأكيد مزدوج: {self.cfg.get('strategy.require_both')})",
-                f"الإطار الزمني: {self.cfg.get('strategy.timeframe')}",
+                f"الاستراتيجية: <code>{fmt.esc(strategy.key)}</code> — {fmt.esc(strategy.title)}",
+                f"المخارج: {exit_ar}",
+                f"الإطار الزمني: <code>{fmt.esc(self.cfg.effective_timeframe())}</code>",
                 f"وضع التنفيذ: {mode}",
                 exec_line,
                 f"الفحص: كل {self.cfg.get('scanner.interval_seconds')} ثانية",
+            ]
+            + (["", "⚠️ <b>تحذيرات الاتساق</b>"] + [f"  • {w}" for w in warnings] if warnings else [])
+            + [
                 "",
                 "اضغط 🔍 فحص الآن لتفحص السوق فوراً، أو ❔ مساعدة لكل الأوامر.",
             ]
@@ -659,7 +673,7 @@ class TelegramBot:
         )
 
     def _switch_strategy(self, key: str) -> str:
-        """يبدّل الاستراتيجية فوراً (مع وضع الخروج المناسب لها)."""
+        """يبدّل الاستراتيجية فوراً (مع وضع الخروج المناسب لها) — بصرامة."""
         strategy = get_strategy(key)
         previous = self.cfg.get("strategy.name")
         self.cfg.set("strategy.name", strategy.key)
@@ -683,8 +697,9 @@ class TelegramBot:
                 "",
                 f"مخارج الصفقة: {mode_ar}",
                 f"مُسحت السمومية عن {cleared} رمزاً — تُستخدم في الفحص القادم.",
-                saved,
             ]
+            + [f"🔒 <b>صرامة</b>: {note}" for note in self.trader.validate_strategy_config()]
+            + [saved]
         )
 
     async def _show_switched(self, query, text: str) -> None:
@@ -724,11 +739,15 @@ class TelegramBot:
 
     def _strategy_text(self) -> str:
         current = get_strategy(self.cfg.get("strategy.name"))
+        follow = bool(self.cfg.get("exit.follow_strategy", True))
+        strict = bool(self.cfg.get("exit.strict", True))
         lines = [
             "🧠 <b>الاستراتيجيات</b>",
             "",
             f"الحالية: <code>{fmt.esc(current.key)}</code> — {fmt.esc(current.title)}",
             f"المخارج: {'ATR' if current.exit_mode == 'atr' else 'نسب ثابتة'}",
+            f"الصرامة: {'🔒 مُفعّلة' if (follow and strict) else '🔓 مخفّفة'} "
+            f"(تتبع الاستراتيجية: {follow} | رفض المخارج الدخيلة: {strict})",
             "",
         ]
         for item in all_strategies():
@@ -737,6 +756,9 @@ class TelegramBot:
                 f"{mark} <code>{fmt.esc(item.key)}</code> — {fmt.esc(item.title)}",
                 f"   {fmt.esc(item.description)}",
             ]
+        warnings = list(getattr(self.trader, "strategy_warnings", []))
+        if warnings:
+            lines += ["", "⚠️ <b>تحذيرات الاتساق</b>"] + [f"  • {w}" for w in warnings]
         lines += ["", "<i>للتبديل: /strategy scalping_i أو اضغط الزر أدناه.</i>"]
         return "\n".join(lines)
 
@@ -847,6 +869,16 @@ class TelegramBot:
                 exchange.dry_run = bool(value)
         if key == "strategy":
             return True, self._switch_strategy(str(value))
+        if key in ("exit", "follow_exit", "strict", "candles"):
+            # صرامة: المخارج تتبع الاستراتيجية المختارة — أي تعارض يُصلح ويُبلَّغ
+            notes = self.trader.validate_strategy_config()
+            if notes:
+                self.cfg.save()
+                return True, (
+                    f"✅ تم التعديل\n<b>{key}</b>: <code>{fmt.esc(str(old))}</code>"
+                    f" ← <code>{fmt.esc(str(self.cfg.get(path)))}</code>\n\n"
+                    + "\n".join(f"🔒 {note}" for note in notes)
+                )
         if key == "tf":
             # السمومية القديمة كانت تمنع ظهور إشارات الإطار الجديد لمدة 30 دقيقة
             cleared = self.trader.on_timeframe_changed()

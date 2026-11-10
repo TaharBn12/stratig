@@ -12,6 +12,18 @@ if not exist ".venv" (
 )
 
 echo.
+echo ============ تدقيق الملفات ============
+echo.
+".venv\Scripts\python.exe" scripts\audit.py
+if errorlevel 1 (
+    echo.
+    echo [X] التدقيق وجد مشاكل - أرسل لي الناتج أعلاه.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
 echo ============ فحص الاتصال ============
 echo.
 ".venv\Scripts\python.exe" main.py --check

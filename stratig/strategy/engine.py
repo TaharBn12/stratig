@@ -8,6 +8,9 @@ from ..data import Candles, NAN
 from ..utils import esc
 from .indicators import BUY, SELL, IndicatorResult, rsi_signal, williams_r_signal
 
+KEY = "rsi_williams"
+MIN_CANDLES = 60          # أقل عدد شموع تحتاجه هذه الاستراتيجية
+
 
 @dataclass
 class Decision:
@@ -63,15 +66,17 @@ def evaluate(
     """
     timeframe = str(cfg.get("strategy.timeframe", "15m"))
     require_both = bool(cfg.get("strategy.require_both", True))
-    decision = Decision(symbol=symbol, timeframe=timeframe, requires_both=require_both)
+    decision = Decision(
+        symbol=symbol, timeframe=timeframe, requires_both=require_both, strategy=KEY
+    )
 
     if candles is None or len(candles) == 0:
         decision.notes.append("لا توجد شموع")
         return decision
 
     data = candles.without_last() if (use_closed_candles and len(candles) > 2) else candles
-    if len(data) < 60:
-        decision.notes.append("عدد الشموع قليل")
+    if len(data) < MIN_CANDLES:
+        decision.notes.append(f"عدد الشموع قليل (يحتاج {MIN_CANDLES})")
         return decision
 
     close = list(data.close)

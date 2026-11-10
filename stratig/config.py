@@ -69,6 +69,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "exit": {
         "mode": "percent",              # percent | atr
+        # الصرامة: مخارج الصفقة تتبع الاستراتيجية المختارة دائماً
+        # (scalping_i = ATR، rsi_williams = نسب ثابتة). لتجاوز ذلك يدوياً:
+        #   /set follow_exit false  ثم  /set exit percent
+        "follow_strategy": True,
+        # إن كانت الاستراتيجية تفرض مخارج ATR ولم تُعطِ مسافات، نرفض فتح
+        # الصفقة بدل استخدام نسب ثابتة لا تنتمي إليها.
+        "strict": True,
         "atr": {"length": 7, "sl_coef": 1.1, "tp_ratio": 1.5},
     },
     "trade": {
@@ -256,6 +263,26 @@ class Config:
             f"المسموح: {', '.join(ALLOWED_TIMEFRAMES)} — غيّره بـ /tf 4h"
         )
 
+    def effective_timeframe(self) -> str:
+        """الإطار الزمني **الصالح للاستخدام الآن** — لا يُرجع قيمة مرفوضة أبداً.
+
+        `strategy.timeframe` قد يُعدَّل يدوياً في الملف أثناء عمل البوت،
+        و`reload()` كان يقرأه كما هو → إطار ترفضه المنصة ولا تظهر إشارات.
+        الآن كل قراءة تمرّ من هنا: تُوحَّد القيمة، وتُصحَّح إن لزم، ويُبلَّغ.
+        """
+        raw = self.get("strategy.timeframe", DEFAULT_TIMEFRAME)
+        tf = normalize_timeframe(raw)
+        if not is_supported_timeframe(tf):
+            log.warning(
+                "إطار زمني غير مدعوم في الإعدادات: %r — تم استخدام %s",
+                raw, DEFAULT_TIMEFRAME,
+            )
+            tf = DEFAULT_TIMEFRAME
+        if tf != str(raw):
+            self.set("strategy.timeframe", tf)
+            self._save_quietly()
+        return tf
+
     def pin(self, path: str, value: Any) -> None:
         """يثبّت قيمة من سطر الأوامر بحيث تبقى حتى بعد إعادة تحميل الملف."""
         self._pinned[path] = value
@@ -286,6 +313,7 @@ class Config:
         for path, value in self._pinned.items():
             self.set(path, value)
         self._mtime = mtime
+        self.ensure_timeframe()      # تعديل يدوي للإطار → نُصحّحه فوراً
         return True
 
     def save(self) -> None:

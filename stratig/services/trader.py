@@ -12,7 +12,12 @@ from typing import Optional
 from ..config import Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
 from ..strategy.engine import Decision
-from ..strategy.registry import evaluate as strategy_evaluate, get as get_strategy
+from ..strategy.registry import (
+    check_config as check_strategy_config,
+    evaluate as strategy_evaluate,
+    names as strategy_names,
+    resolve as resolve_strategy,
+)
 from .notifier import Button, MessageRef, Notifier
 from ..utils import esc as _esc, num as _num
 
@@ -76,6 +81,11 @@ class Trader:
         self.trades_today = 0
         self.pnl_today = 0.0
 
+        # صرامة الاستراتيجية: أي تعارض بين الإعدادات والاستراتيجية المختارة
+        # يُسجَّل هنا ليظهر للمستخدم بدل أن يُهمَل بصمت
+        self.strategy_warnings: list[str] = []
+        self._strategy_warned = False
+
     # ═══════════════════ إعداد ═══════════════════
     def attach_notifier(self, notifier: Notifier) -> None:
         self.notifier = notifier
@@ -83,11 +93,28 @@ class Trader:
     @property
     def strategy_key(self) -> str:
         """معرّف الاستراتيجية المُستخدمة الآن (من config.toml)."""
-        return get_strategy(self.cfg.get("strategy.name")).key
+        return self.strategy.key
 
     @property
     def strategy(self):
-        return get_strategy(self.cfg.get("strategy.name"))
+        """الاستراتيجية المُستخدمة فعلاً — مع تحذير صريح إن كان الاسم غير معروف."""
+        strategy, error = resolve_strategy(self.cfg.get("strategy.name"))
+        if error and not self._strategy_warned:
+            self._strategy_warned = True
+            self.strategy_warnings.append(
+                f"⚠️ {error} — يعمل البوت الآن بـ <code>{strategy.key}</code>. "
+                f"المتاحة: <code>{', '.join(strategy_names())}</code>"
+            )
+            log.error("%s — تم استخدام %s بدلاً منها", error, strategy.key)
+        return strategy
+
+    def validate_strategy_config(self) -> list[str]:
+        """يتحقق من اتساق إعدادات الاستراتيجية ويُصلحها (يُستدعى عند الإقلاع)."""
+        warnings = check_strategy_config(self.cfg)
+        for note in warnings:
+            log.warning("%s", note.replace("<code>", "").replace("</code>", ""))
+        self.strategy_warnings = list(dict.fromkeys(self.strategy_warnings + warnings))
+        return warnings
 
     @property
     def mode(self) -> str:
@@ -305,7 +332,7 @@ class Trader:
 
     async def _report_total_failure(self, count: int) -> None:
         """"فشل جلب الشموع لكل الرموز" — السبب الغالب: إطار زمني ترفضه المنصة."""
-        timeframe = str(self.cfg.get("strategy.timeframe", "15m"))
+        timeframe = self.cfg.effective_timeframe()
         message = (
             f"❌ تعذّر جلب الشموع لكل الرموز ({count}) على الإطار "
             f"<code>{_esc(timeframe)}</code>.\n"
@@ -325,14 +352,15 @@ class Trader:
         if time.time() < self.cooldown.get(symbol, 0):
             return None
 
-        timeframe = str(self.cfg.get("strategy.timeframe", "15m"))
+        timeframe = self.cfg.effective_timeframe()      # صالح للمنصة دائماً
         limit = int(self.cfg.get("strategy.candles", 500))
         use_closed = bool(self.cfg.get("strategy.use_closed_candles", True))
+        strategy = self.strategy
 
         try:
             df = await asyncio.to_thread(self.exchange.klines, symbol, timeframe, limit)
             decision = strategy_evaluate(
-                self.strategy_key, df, self.cfg, symbol=symbol, use_closed_candles=use_closed
+                strategy.key, df, self.cfg, symbol=symbol, use_closed_candles=use_closed
             )
         except Exception as err:
             self.scan_failures += 1
@@ -340,6 +368,23 @@ class Trader:
             return None
 
         if not decision.has_signal:
+            return None
+
+        # صرامة: القرار يجب أن يكون صادراً من الاستراتيجية المختارة
+        # وعلى نفس الإطار المطلوب — وإلا نرفضه بدل تمريره
+        if decision.strategy and decision.strategy != strategy.key:
+            log.error(
+                "[%s] القرار من استراتيجية %s بينما المختارة %s — تم رفض الإشارة",
+                symbol, decision.strategy, strategy.key,
+            )
+            self.stats["errors"] += 1
+            return None
+        if decision.timeframe and decision.timeframe != timeframe:
+            log.error(
+                "[%s] القرار على الإطار %s والمطلوب %s — تم رفض الإشارة",
+                symbol, decision.timeframe, timeframe,
+            )
+            self.stats["errors"] += 1
             return None
 
         ttl = float(self.cfg.get("scanner.signal_ttl_seconds", 900))
@@ -406,14 +451,36 @@ class Trader:
 
     # ═══════════════════ التنفيذ ═══════════════════
     def _exit_percentages(self, sig: "PendingSignal") -> tuple[float, float]:
-        """يحدد نسبة الوقف والهدف: من ATR (حسب الاستراتيجية) أو من الإعدادات."""
+        """(للتوافق مع الاختبارات القديمة) نسب المخارج، أو (0, 0) إن تعذّر تحديدها."""
+        tp_pct, sl_pct, _error = self._resolve_exits(sig)
+        return tp_pct, sl_pct
+
+    def _resolve_exits(self, sig: "PendingSignal") -> tuple[float, float, str]:
+        """يحدد نسبتي الوقف والهدف — ويرفض إن لم تكن من الاستراتيجية المختارة.
+
+        الصرامة: إن كانت الاستراتيجية تفرض مخارج ATR ولم تُعطِ مسافات،
+        نُرجع سبباً صريحاً بدل فتح الصفقة بنسب ثابتة لا تنتمي إليها.
+        """
         tp_pct = float(self.cfg.get("trade.take_profit_pct", 0.012))
         sl_pct = float(self.cfg.get("trade.stop_loss_pct", 0.009))
         mode = str(self.cfg.get("exit.mode", "percent")).lower()
+        strict = bool(self.cfg.get("exit.strict", True))
         distance = sig.decision.sl_distance if sig.decision else None
         target = sig.decision.tp_distance if sig.decision else None
-        if mode != "atr" or not distance or not sig.price:
-            return tp_pct, sl_pct
+
+        if mode != "atr":
+            return tp_pct, sl_pct, ""
+        if not distance or not sig.price:
+            reason = (
+                f"الاستراتيجية <code>{_esc(self.strategy_key)}</code> تفرض مخارج ATR "
+                "ولم تُحتسب مسافة الوقف — لن تُفتح الصفقة بمخارج لا تنتمي إليها."
+            )
+            if strict:
+                log.error("[%s] %s", sig.symbol, reason)
+                return 0.0, 0.0, reason
+            log.warning("[%s] تراجع للنسب الثابتة (exit.strict=false)", sig.symbol)
+            return tp_pct, sl_pct, ""
+
         # الاستراتيجية تعطي المسافات بالسعر → نحوّلها إلى نسب من سعر الدخول
         sl_pct = distance / sig.price
         tp_pct = (target or distance * float(
@@ -422,7 +489,7 @@ class Trader:
             "[%s] مخارج ATR: وقف %s (%.4g%%) | هدف %s (%.4g%%)",
             sig.symbol, f"{distance:.6g}", sl_pct * 100, f"{(target or 0):.6g}", tp_pct * 100,
         )
-        return tp_pct, sl_pct
+        return tp_pct, sl_pct, ""
 
     async def open_signal(self, signal_id: str, notify_result: bool = True) -> Optional[OrderResult]:
         sig = self.pending.get(signal_id)
@@ -440,7 +507,15 @@ class Trader:
             await self.notifier.send(f"⛔ لم يتم فتح {sig.symbol}: {blocked}")
             return None
 
-        tp_pct, sl_pct = self._exit_percentages(sig)
+        tp_pct, sl_pct, exit_error = self._resolve_exits(sig)
+        if exit_error:
+            sig.status = STATUS_FAILED
+            sig.error = exit_error
+            await self.notifier.send(
+                f"⛔ لم يتم فتح <code>{_esc(sig.symbol)}</code>: {exit_error}\n"
+                "للتجاوز: <code>/set strict false</code>"
+            )
+            return None
         try:
             result = await asyncio.to_thread(
                 self.exchange.open_market,
@@ -574,8 +649,9 @@ class Trader:
             "exchange": self.exchange.name,
             "testnet": self.exchange.testnet,
             "dry_run": bool(self.cfg.get("safety.dry_run", False)),
-            "timeframe": str(self.cfg.get("strategy.timeframe", "15m")),
+            "timeframe": self.cfg.effective_timeframe(),
             "strategy": self.strategy_key,
+            "strategy_warnings": list(self.strategy_warnings),
             "last_scan": self.last_scan_at,
             "source": self.last_scan_source or self.symbols_source,
             "last_scan_duration": self.last_scan_duration,

@@ -12,6 +12,8 @@ from stratig.config import Config  # noqa: E402
 from stratig.data import Candles, from_lists  # noqa: E402
 from stratig.strategy import evaluate, rsi_signal, williams_r_signal  # noqa: E402
 from stratig.strategy import indicators  # noqa: E402
+from stratig.strategy import scalping_i  # noqa: E402
+from stratig.utils import is_supported_timeframe  # noqa: E402
 
 
 def make_candles(
@@ -184,3 +186,96 @@ def test_native_indicators_match_ta_when_available():
     w = [v for v in indicators.williams_r(data.high, data.low, data.close, 24) if v == v]
     t_w = ta_mod.momentum.WilliamsRIndicator(high, low, close, lbp=24).williams_r().dropna().reset_index(drop=True)
     assert maxdiff(indicators.ema(w, 24), ta_mod.trend.ema_indicator(t_w, window=24)) < 1e-9
+
+
+# ═══════════════════════ صرامة الاستراتيجية ═══════════════════════
+def test_resolve_reports_unknown_strategy():
+    """/set strategy مجهول لا يُمرَّر بصمت — بل يُبلَّغ."""
+    from stratig.strategy.registry import resolve
+
+    strategy, error = resolve("rsi_williams")
+    assert strategy.key == "rsi_williams" and error == ""
+
+    strategy, error = resolve("martingale")
+    assert strategy.key == "rsi_williams" and "غير معروفة" in error
+
+    strategy, error = resolve(None)
+    assert "لم تُحدَّد" in error
+
+
+def test_check_config_fixes_exit_mode_mismatch():
+    """الاستراتيجية تُطبَّق كاملة: مخارجها تطغى على exit.mode المتعارض."""
+    from stratig.strategy.registry import check_config
+
+    cfg = Config({"strategy": {"name": "scalping_i"}, "exit": {"mode": "percent"}},
+                 path=Path("config.toml"))
+    notes = check_config(cfg)
+    assert cfg.get("exit.mode") == "atr"          # صُحِّح
+    assert any("لا يطابق" in note for note in notes)
+
+
+def test_check_config_respects_manual_override():
+    """/set follow_exit false = تجاوز واعٍ ولا تحذير."""
+    from stratig.strategy.registry import check_config
+
+    cfg = Config(
+        {"strategy": {"name": "scalping_i"},
+         "exit": {"mode": "percent", "follow_strategy": False}},
+        path=Path("config.toml"),
+    )
+    assert check_config(cfg) == []
+    assert cfg.get("exit.mode") == "percent"
+
+
+def test_check_config_fixes_unknown_strategy_name():
+    from stratig.strategy.registry import check_config
+
+    cfg = Config({"strategy": {"name": "خيالية"}}, path=Path("config.toml"))
+    notes = check_config(cfg)
+    assert cfg.get("strategy.name") == "rsi_williams"
+    assert any("غير معروفة" in note for note in notes)
+
+
+def test_check_config_warns_when_candles_below_minimum():
+    """/set candles 30 مع استراتيجية تحتاج 62 = لن تصدر أي إشارة → نُبلّغ."""
+    from stratig.strategy.registry import check_config
+
+    cfg = Config({"strategy": {"name": "scalping_i", "candles": 30}},
+                 path=Path("config.toml"))
+    notes = check_config(cfg)
+    assert any("لن تصدر أي إشارة" in note for note in notes)
+
+
+def test_decision_carries_its_strategy_key():
+    """كل استراتيجية توسم قرارها — حتى نرفض أي إشارة من غير المختارة."""
+    from stratig.strategy.engine import KEY as RSI_KEY
+    from stratig.strategy.scalping_i import KEY as SCALP_KEY
+
+    cfg = Config({}, path=Path("config.toml"))
+    candles = make_candles(sign=1)
+    assert evaluate(candles, cfg).strategy == RSI_KEY
+    assert scalping_i.evaluate(candles, cfg).strategy == SCALP_KEY
+
+
+# ═══════════════════════ صرامة الإطار الزمني ═══════════════════════
+def test_effective_timeframe_never_returns_invalid(tmp_path):
+    cfg = Config({}, path=tmp_path / "c.toml")
+    for raw in ("4", "5", "15min", "1h", "1M", "1mo", "60", "1440"):
+        cfg.set("strategy.timeframe", raw)
+        assert is_supported_timeframe(cfg.effective_timeframe()), raw
+
+
+def test_effective_timeframe_repairs_manual_edit(tmp_path):
+    """تعديل config.toml يدوياً أثناء عمل البوت كان يمرّ بصمت."""
+    cfg = Config({}, path=tmp_path / "c.toml")
+    cfg.set("strategy.timeframe", "zzz")
+    assert cfg.effective_timeframe() == "15m"
+    assert cfg.get("strategy.timeframe") == "15m"   # ثُبِّت في الإعدادات
+
+
+def test_reload_repairs_timeframe(tmp_path):
+    path = tmp_path / "c.toml"
+    cfg = Config({}, path=path)
+    path.write_text('[strategy]\ntimeframe = "45m"\n', encoding="utf-8")
+    cfg.reload()
+    assert is_supported_timeframe(cfg.get("strategy.timeframe"))

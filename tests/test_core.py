@@ -580,10 +580,34 @@ def test_trader_keeps_percent_exits_for_original_strategy(tmp_path):
     assert sl_pct == pytest.approx(0.009)
 
 
-def test_exit_percentages_falls_back_when_no_distance(tmp_path):
-    trader, ex = make_trader(tmp_path, exit__mode="atr")
+def test_exits_refuse_when_strategy_gives_no_distance(tmp_path):
+    """الصرامة: مخارج ATR بلا مسافات = رفض صريح، لا تراجع صامت للنسب الثابتة."""
+    trader, ex = make_trader(tmp_path, exit__mode="atr", exit__strict=True)
     asyncio.run(trader.scan_once())
     sig = list(trader.pending.values())[0]
     sig.decision.sl_distance = None                # الاستراتيجية لا تعطي مسافات
-    tp_pct, sl_pct = trader._exit_percentages(sig)
+    tp_pct, sl_pct, error = trader._resolve_exits(sig)
+    assert error                                   # سبب واضح
+    assert (tp_pct, sl_pct) == (0.0, 0.0)          # ولا نفتح الصفقة
+
+
+def test_exits_fall_back_only_when_strict_disabled(tmp_path):
+    """/set strict false = تجاوز واعٍ، لا سلوك افتراضي."""
+    trader, ex = make_trader(tmp_path, exit__mode="atr", exit__strict=False)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    sig.decision.sl_distance = None
+    tp_pct, sl_pct, error = trader._resolve_exits(sig)
+    assert error == ""
     assert (tp_pct, sl_pct) == pytest.approx((0.012, 0.009))
+
+
+def test_open_signal_refuses_when_exits_are_not_from_strategy(tmp_path):
+    """لا تُفتح أي صفقة بمخارج لا تنتمي للاستراتيجية المختارة."""
+    trader, ex = make_trader(tmp_path, exit__mode="atr", exit__strict=True)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    sig.decision.sl_distance = None
+    assert asyncio.run(trader.open_signal(sig.id)) is None
+    assert not ex.calls                            # لم يُرسل أي أمر
+
