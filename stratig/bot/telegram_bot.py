@@ -687,6 +687,25 @@ class TelegramBot:
             ]
         )
 
+    async def _show_switched(self, query, text: str) -> None:
+        """يعرض نتيجة التبديل: يحاول تعديل الرسالة، وإن رفض تليجرام يرسل رسالة جديدة.
+
+        تليجرام يمنع تعديل رسالة مضى عليها أكثر من 48 ساعة (أو إن لم تتغيّر)،
+        فيبدو الزر وكأنه «لا يعمل» — لذا نرسل رسالة جديدة بدلاً من الصمت.
+        """
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML)
+            return
+        except Exception as err:  # pragma: no cover - يعتمد على حالة الرسالة
+            log.debug("تعذّر تعديل الرسالة، سأرسل رسالة جديدة: %s", err)
+        try:
+            await query.answer("✅ تم تغيير الاستراتيجية", show_alert=True)
+        except Exception:  # pragma: no cover
+            pass
+        message = getattr(query, "message", None)
+        if message is not None:
+            await message.reply_text(text, parse_mode=ParseMode.HTML)
+
     @restricted
     async def _strategy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/strategy — عرض الاستراتيجيات أو التبديل بينها."""
@@ -975,11 +994,9 @@ class TelegramBot:
         # ── تبديل الاستراتيجية ──
         if kind == "strat" and len(data) == 2:
             if not is_supported_strategy(data[1]):
-                await query.edit_message_text("❌ استراتيجية غير معروفة")
+                await query.answer("❌ استراتيجية غير معروفة", show_alert=True)
                 return
-            await query.edit_message_text(
-                self._switch_strategy(data[1]), parse_mode=ParseMode.HTML
-            )
+            await self._show_switched(query, self._switch_strategy(data[1]))
             return
 
         # ── إشارات ──
