@@ -95,6 +95,138 @@ def _valid(values: Sequence[float]) -> list[float]:
     return [v for v in values if not math.isnan(v)]
 
 
+# ═════════════════════════ بولينجر و ATR ═════════════════════════
+def sma(values: Sequence[float], window: int) -> list[float]:
+    """متوسط بسيط متحرك — أول window-1 قيمة NaN مثل pandas rolling().mean()."""
+    window = max(1, int(window))
+    out: list[float] = []
+    total = 0.0
+    for index, value in enumerate(values):
+        total += float(value)
+        if index >= window:
+            total -= float(values[index - window])
+        out.append(total / window if index >= window - 1 else NAN)
+    return out
+
+
+def rolling_std(values: Sequence[float], window: int, ddof: int = 1) -> list[float]:
+    """انحراف معياري متحرك — ddof=1 هو سلوك pandas التلقائي (وما تستخدمه pandas_ta)."""
+    window = max(1, int(window))
+    divisor = window - int(ddof)
+    if divisor <= 0:
+        divisor = window
+    out: list[float] = []
+    for index in range(len(values)):
+        if index < window - 1:
+            out.append(NAN)
+            continue
+        chunk = [float(v) for v in values[index - window + 1 : index + 1]]
+        mean = sum(chunk) / window
+        variance = sum((x - mean) ** 2 for x in chunk) / divisor
+        out.append(math.sqrt(variance) if variance > 0 else 0.0)
+    return out
+
+
+def bbands(
+    close: Sequence[float],
+    length: int = 15,
+    std: float = 1.5,
+    ddof: int = 1,
+) -> tuple[list[float], list[float], list[float]]:
+    """بولينجر باندز: (سفلي، أوسط، علوي) — مثل ta.bbands(close, length, std)."""
+    middle = sma(close, length)
+    deviation = rolling_std(close, length, ddof=ddof)
+    lower = [
+        m - std * d if not (math.isnan(m) or math.isnan(d)) else NAN
+        for m, d in zip(middle, deviation)
+    ]
+    upper = [
+        m + std * d if not (math.isnan(m) or math.isnan(d)) else NAN
+        for m, d in zip(middle, deviation)
+    ]
+    return lower, middle, upper
+
+
+def true_range(
+    high: Sequence[float], low: Sequence[float], close: Sequence[float], drift: int = 1
+) -> list[float]:
+    """المدى الحقيقي TR = max(H-L, |H - إغلاق سابق|, |إغلاق سابق - L|)."""
+    out: list[float] = []
+    for index in range(len(close)):
+        if index < drift:
+            out.append(NAN)
+            continue
+        previous = float(close[index - drift])
+        out.append(
+            max(
+                float(high[index]) - float(low[index]),
+                abs(float(high[index]) - previous),
+                abs(previous - float(low[index])),
+            )
+        )
+    return out
+
+
+def rma(values: Sequence[float], length: int) -> list[float]:
+    """Wilder's RMA كما يعرّفه pandas_ta: ewm(alpha=1/length, min_periods=length).
+
+    ملاحظة: pandas_ta يستخدم الصيغة المُعدَّلة (adjust=True) لا صيغة ويلدر
+    التكرارية — والفرق بينهما يتلاشى بعد بضع عشرات من الشموع.
+    """
+    length = max(1, int(length))
+    alpha = 1.0 / length
+    out: list[float] = [NAN] * len(values)
+    numerator = denominator = 0.0
+    seen = 0
+    started = False
+    for index, raw in enumerate(values):
+        value = float(raw)
+        if math.isnan(value):
+            continue
+        seen += 1
+        if not started:
+            numerator, denominator, started = value, 1.0, True
+        else:
+            numerator = (1 - alpha) * numerator + value
+            denominator = (1 - alpha) * denominator + 1
+        if seen >= length:
+            out[index] = numerator / denominator
+    return out
+
+
+def wilder_ma(values: Sequence[float], length: int) -> list[float]:
+    """تنعيم ويلدر الكلاسيكي (بذرة SMA ثم المتوسط المتحرك بويلدر)."""
+    length = max(1, int(length))
+    out: list[float] = [NAN] * len(values)
+    seed: list[float] = []
+    previous: float | None = None
+    for index, raw in enumerate(values):
+        value = float(raw)
+        if math.isnan(value):
+            continue
+        if previous is None:
+            seed.append(value)
+            if len(seed) == length:
+                previous = sum(seed) / length
+                out[index] = previous
+        else:
+            previous = (previous * (length - 1) + value) / length
+            out[index] = previous
+    return out
+
+
+def atr(
+    high: Sequence[float],
+    low: Sequence[float],
+    close: Sequence[float],
+    length: int = 7,
+    mode: str = "rma",
+) -> list[float]:
+    """متوسط المدى الحقيقي — مثل ta.atr(high, low, close, length)."""
+    moving = wilder_ma if str(mode).lower().startswith("w") else rma
+    return moving(true_range(high, low, close), length)
+
+
 # ═════════════════════════ الإشارات ═════════════════════════
 def rsi_signal(
     close: Sequence[float],

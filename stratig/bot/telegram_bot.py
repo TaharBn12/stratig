@@ -24,6 +24,11 @@ from telegram.ext import (
 )
 
 from ..config import Config, Secrets
+from ..strategy.registry import (
+    all_strategies,
+    get as get_strategy,
+    is_supported as is_supported_strategy,
+)
 from ..utils import ALLOWED_TIMEFRAMES, is_supported_timeframe, normalize_timeframe
 from ..services.notifier import TelegramNotifier
 from ..services.trader import Trader
@@ -67,6 +72,8 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "lev": ("trade.leverage", "int", "الرافعة المالية — مثال: 10"),
     "margin": ("trade.margin_mode", "choice:isolated,cross", "نوع الهامش"),
     "tf": ("strategy.timeframe", "str", "الإطار الزمني — مثال: 15m أو 1h"),
+    "strategy": ("strategy.name", "choice:rsi_williams,scalping_i", "الاستراتيجية المستخدمة"),
+    "exit": ("exit.mode", "choice:percent,atr", "مخارج الصفقة: نسب ثابتة أم ATR"),
     "interval": ("scanner.interval_seconds", "int", "مدة الفحص بالثواني — مثال: 120"),
     "ttl": ("scanner.signal_ttl_seconds", "int", "مدة صلاحية الإشارة بالثواني — مثال: 900"),
     "cooldown": ("scanner.cooldown_seconds", "int", "فترة السمومية لكل رمز بالثواني — مثال: 1800"),
@@ -151,6 +158,7 @@ class TelegramBot:
             ("dryrun", self._dry_run_mode),
             ("real", self._live),
             ("reload", self._reload),
+            ("strategy", self._strategy),
             ("tf", self._timeframe),
             ("settings", self._settings),
             ("set", self._set),
@@ -650,6 +658,78 @@ class TelegramBot:
             f"مدة الفحص: <code>{self.cfg.get('scanner.interval_seconds')}</code> ثانية",
         )
 
+    def _switch_strategy(self, key: str) -> str:
+        """يبدّل الاستراتيجية فوراً (مع وضع الخروج المناسب لها)."""
+        strategy = get_strategy(key)
+        previous = self.cfg.get("strategy.name")
+        self.cfg.set("strategy.name", strategy.key)
+        self.cfg.set("exit.mode", strategy.exit_mode)
+        try:
+            self.cfg.save()
+            saved = "✅ حُفظ في config.toml"
+        except Exception as err:  # pragma: no cover
+            log.warning("تعذّر حفظ الإعدادات: %s", err)
+            saved = "⚠️ لم يُحفظ في الملف"
+
+        cleared = self.trader.on_timeframe_changed()   # يمسح السمومية ليظهر أثرها فوراً
+        self.trader.invalidate_symbols()
+        mode_ar = "ATR (حسب الاستراتيجية)" if strategy.exit_mode == "atr" else "نسب ثابتة"
+        return "\n".join(
+            [
+                "🧠 <b>تم تغيير الاستراتيجية</b>",
+                "",
+                f"<code>{fmt.esc(str(previous))}</code> ← <b>{fmt.esc(strategy.key)}</b>",
+                fmt.esc(strategy.title),
+                "",
+                f"مخارج الصفقة: {mode_ar}",
+                f"مُسحت السمومية عن {cleared} رمزاً — تُستخدم في الفحص القادم.",
+                saved,
+            ]
+        )
+
+    @restricted
+    async def _strategy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/strategy — عرض الاستراتيجيات أو التبديل بينها."""
+        args = context.args or []
+        if args:
+            key = str(args[0]).strip().lower()
+            if not is_supported_strategy(key):
+                allowed = ", ".join(item.key for item in all_strategies())
+                await self._reply(
+                    update, f"❌ استراتيجية غير معروفة. المتاحة: <code>{fmt.esc(allowed)}</code>"
+                )
+                return
+            await self._reply(update, self._switch_strategy(key))
+            return
+        await self._reply(update, self._strategy_text(), self._strategy_keyboard())
+
+    def _strategy_text(self) -> str:
+        current = get_strategy(self.cfg.get("strategy.name"))
+        lines = [
+            "🧠 <b>الاستراتيجيات</b>",
+            "",
+            f"الحالية: <code>{fmt.esc(current.key)}</code> — {fmt.esc(current.title)}",
+            f"المخارج: {'ATR' if current.exit_mode == 'atr' else 'نسب ثابتة'}",
+            "",
+        ]
+        for item in all_strategies():
+            mark = "▶️" if item.key == current.key else "▫️"
+            lines += [
+                f"{mark} <code>{fmt.esc(item.key)}</code> — {fmt.esc(item.title)}",
+                f"   {fmt.esc(item.description)}",
+            ]
+        lines += ["", "<i>للتبديل: /strategy scalping_i أو اضغط الزر أدناه.</i>"]
+        return "\n".join(lines)
+
+    def _strategy_keyboard(self) -> InlineKeyboardMarkup:
+        current = get_strategy(self.cfg.get("strategy.name"))
+        rows = [
+            [InlineKeyboardButton(f"🧠 {item.title}", callback_data=f"strat:{item.key}")]
+            for item in all_strategies()
+            if item.key != current.key
+        ]
+        return InlineKeyboardMarkup(rows)
+
     @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
@@ -746,6 +826,8 @@ class TelegramBot:
             exchange = getattr(self.trader, "exchange", None)
             if exchange is not None:
                 exchange.dry_run = bool(value)
+        if key == "strategy":
+            return True, self._switch_strategy(str(value))
         if key == "tf":
             # السمومية القديمة كانت تمنع ظهور إشارات الإطار الجديد لمدة 30 دقيقة
             cleared = self.trader.on_timeframe_changed()
@@ -889,6 +971,16 @@ class TelegramBot:
 
         data = (query.data or "").split(":")
         kind = data[0]
+
+        # ── تبديل الاستراتيجية ──
+        if kind == "strat" and len(data) == 2:
+            if not is_supported_strategy(data[1]):
+                await query.edit_message_text("❌ استراتيجية غير معروفة")
+                return
+            await query.edit_message_text(
+                self._switch_strategy(data[1]), parse_mode=ParseMode.HTML
+            )
+            return
 
         # ── إشارات ──
         if kind == "sig" and len(data) == 3:

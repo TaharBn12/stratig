@@ -19,6 +19,13 @@ class Decision:
     willr: Optional[IndicatorResult] = None
     requires_both: bool = True
     notes: list[str] = field(default_factory=list)
+    # ── حقول مشتركة بين كل الاستراتيجيات ──
+    strategy: str = ""
+    lines: list[str] = field(default_factory=list)   # وصف جاهز للعرض (تليجرام)
+    sl_distance: float | None = None                 # مسافة الوقف بالسعر (من ATR مثلاً)
+    tp_distance: float | None = None                 # مسافة الهدف بالسعر
+    stop_loss: float | None = None                   # سعر وقف مطلق
+    take_profit: float | None = None                 # سعر هدف مطلق
 
     @property
     def has_signal(self) -> bool:
@@ -34,6 +41,8 @@ class Decision:
         )
 
     def describe(self) -> str:
+        if self.lines:                      # الاستراتيجيات الجديدة توفّر وصفها بنفسها
+            return "\n".join(self.lines)
         lines = []
         for ind in (self.rsi, self.willr):
             if ind is None:

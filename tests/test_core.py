@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.config import Config, Secrets  # noqa: E402
 from stratig.utils import normalize_timeframe  # noqa: E402
-from stratig.data import make_candles  # noqa: E402
+from stratig.data import Candles, make_candles  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
     ExchangeBase,
@@ -530,3 +530,59 @@ def test_ensure_timeframe_silent_when_valid(tmp_path):
     cfg = Config({"strategy": {"timeframe": "1h"}}, path=tmp_path / "config.toml")
     assert cfg.ensure_timeframe() == ""
     assert cfg.get("strategy.timeframe") == "1h"
+
+
+# ═══════════════════════ مخارج ATR من الاستراتيجية ═══════════════════════
+def _trend_candles(direction: float, size: int = 200):
+    closes = [100.0 * ((1 + 0.003 * direction) ** i) for i in range(size)]
+    closes.append(closes[-1] * (0.90 if direction > 0 else 1.10))
+    return Candles(
+        times=list(range(len(closes))),
+        open=list(closes),
+        high=[c * 1.002 for c in closes],
+        low=[c * 0.998 for c in closes],
+        close=list(closes),
+        volume=[1.0] * len(closes),
+    )
+
+
+def test_trader_uses_atr_exits_when_strategy_asks(tmp_path):
+    """استراتيجية الدفتر تخرج بـ ATR لا بنسب ثابتة، وهدفها = 1.5 × الوقف."""
+    cfg = Config(
+        {
+            "strategy": {"name": "scalping_i", "use_closed_candles": False},
+            "exit": {"mode": "atr"},
+            "scanner": {"symbols_source": "manual", "manual_symbols": ["AAAUSDT"]},
+        },
+        path=tmp_path / "config.toml",
+    )
+    ex = FakeExchange(symbols=("AAAUSDT",), df=_trend_candles(+1))
+    trader = Trader(cfg, ex)
+    assert trader.strategy_key == "scalping_i"
+
+    sig = asyncio.run(trader.scan_once())[0]
+    assert sig.side == "buy"
+    asyncio.run(trader.open_signal(sig.id))
+
+    call = ex.calls[0]                     # (symbol, side, qty, tp_pct, sl_pct, lev, margin)
+    tp_pct, sl_pct = call[3], call[4]
+    assert tp_pct == pytest.approx(sl_pct * 1.5, rel=1e-9)
+    assert sl_pct != pytest.approx(0.009)          # ليست النسبة الثابتة من الإعدادات
+
+
+def test_trader_keeps_percent_exits_for_original_strategy(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    tp_pct, sl_pct = trader._exit_percentages(sig)
+    assert tp_pct == pytest.approx(0.012)
+    assert sl_pct == pytest.approx(0.009)
+
+
+def test_exit_percentages_falls_back_when_no_distance(tmp_path):
+    trader, ex = make_trader(tmp_path, exit__mode="atr")
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    sig.decision.sl_distance = None                # الاستراتيجية لا تعطي مسافات
+    tp_pct, sl_pct = trader._exit_percentages(sig)
+    assert (tp_pct, sl_pct) == pytest.approx((0.012, 0.009))
