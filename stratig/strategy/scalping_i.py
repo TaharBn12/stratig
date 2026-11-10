@@ -56,6 +56,9 @@ SL_COEF = 1.1        # slcoef
 TPSL_RATIO = 1.5     # TPSLRatio
 MYSIZE = 3000        # للاختبار الخلفي فقط (مرجعي)
 
+# أقل عدد شموع تحتاجه الاستراتيجية (EMA 50 + 7 شموع اتجاه + هامش أمان)
+MIN_CANDLES = max(EMA_SLOW, BB_LENGTH, ATR_LENGTH) + BACKCANDLES + 5
+
 # الدفتر: signal==2 → self.buy  |  signal==1 → self.sell
 BUY_SIGNAL = 2
 SELL_SIGNAL = 1

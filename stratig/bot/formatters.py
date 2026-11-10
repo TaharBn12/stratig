@@ -36,6 +36,13 @@ def source_ar(source: str) -> str:
 
 def status_text(st: dict) -> str:
     state = "🟢 يعمل" if st["running"] else "⏸ موقوف"
+    strategy_title = ""
+    try:
+        from ..strategy.registry import get as _get_strategy
+
+        strategy_title = _get_strategy(st.get("strategy")).title
+    except Exception:  # pragma: no cover
+        strategy_title = ""
     mode_ar = "تلقائي (بدون تأكيد)" if st["mode"] == "auto" else "يدوي (بتأكيدك)"
     net = "تيستنت 🧪" if st["testnet"] else "حقيقي 🔴"
     if st["dry_run"]:
@@ -50,6 +57,8 @@ def status_text(st: dict) -> str:
         f"وضع التنفيذ: {mode_ar}",
         f"المحاكاة: {exec_line}",
         "",
+        f"الاستراتيجية: <code>{esc(st.get('strategy', '—'))}</code>"
+        + (f" — {esc(strategy_title)}" if strategy_title else ""),
         f"الإطار الزمني: <code>{esc(st.get('timeframe', '—'))}</code>",
         f"آخر فحص: {ago(st['last_scan'])} ({st['last_scan_duration']:.1f} ث)",
         f"الرموز المفحوصة: {st['symbols']} ({esc(source_ar(st.get('source', '—')))})",
@@ -59,6 +68,10 @@ def status_text(st: dict) -> str:
         f"صفقات اليوم: {st['trades_today']}",
         f"ربح اليوم: <b>{st['pnl_today']:+.4f} USDT</b>",
     ]
+    if st.get("strategy_warnings"):
+        lines += ["", "⚠️ <b>تحذيرات الاتساق</b>"] + [
+            f"  • {w}" for w in st["strategy_warnings"]
+        ]
     if st.get("last_error"):
         lines += ["", f"⚠️ آخر خطأ: <code>{esc(st['last_error'])}</code>"]
     return "\n".join(lines)

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stratig.bot.telegram_bot import TelegramBot  # noqa: E402
 from stratig.config import Config, Secrets  # noqa: E402
+from stratig.utils import is_supported_timeframe  # noqa: E402
 from stratig.services.trader import Trader  # noqa: E402
 from tests.test_core import FakeExchange  # noqa: E402
 from tests.test_strategy import make_candles  # noqa: E402
@@ -427,3 +428,58 @@ def test_strategy_button_falls_back_to_new_message(tmp_path):
 
     assert trader.strategy_key == "scalping_i"       # التبديل نُفّذ فعلاً
     assert sent and "scalping_i" in sent[0]          # وأُرسلت رسالة جديدة بديلاً
+
+
+# ═══════════════════════ صرامة الإعدادات ═══════════════════════
+def test_startup_shows_the_real_strategy(tmp_path):
+    """رسالة الإقلاع كانت تقول «RSI + Williams» دائماً حتى لو اخترت غيرها."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    assert "rsi_williams" in bot._startup_text()
+    bot._switch_strategy("scalping_i")
+    text = bot._startup_text()
+    assert "scalping_i" in text and "Scalping Modified I" in text
+    assert "RSI + Williams" not in text
+
+
+def test_strategy_text_shows_strictness(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    assert "الصرامة" in bot._strategy_text()
+    assert "🔒 مُفعّلة" in bot._strategy_text()
+
+
+def test_set_exit_cannot_silently_break_the_strategy(tmp_path):
+    """/set exit percent مع scalping_i يُعاد إلى ATR ويُبلّغ — لا تغيير صامت."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    bot._switch_strategy("scalping_i")
+    assert bot.cfg.get("exit.mode") == "atr"
+
+    ok, message = bot._apply_setting("exit", "percent")
+    assert ok is True
+    assert bot.cfg.get("exit.mode") == "atr"      # أُعيد لما تفرضه الاستراتيجية
+    assert "صرامة" in message.replace("🔒 ", "صرامة") or "صرامة" in message
+
+
+def test_set_exit_allowed_when_override_enabled(tmp_path):
+    """/set follow_exit false = تجاوز واعٍ بلا تصحيح."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    bot._switch_strategy("scalping_i")
+    bot._apply_setting("follow_exit", "false")
+    ok, message = bot._apply_setting("exit", "percent")
+    assert ok is True and bot.cfg.get("exit.mode") == "percent"
+    assert "صرامة" not in message
+
+
+def test_set_follow_exit_and_strict(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, message = bot._apply_setting("follow_exit", "false")
+    assert ok is True and bot.cfg.get("exit.follow_strategy") is False
+    ok, message = bot._apply_setting("strict", "false")
+    assert ok is True and bot.cfg.get("exit.strict") is False
+
+
+def test_wrong_timeframe_never_breaks_the_bot(tmp_path):
+    """قيمة مستحيلة في الملف: تُصلح ولا توقف البوت."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    bot.cfg.set("strategy.timeframe", "zzz")
+    assert bot.cfg.effective_timeframe() == "15m"
+    assert is_supported_timeframe(bot.cfg.effective_timeframe())

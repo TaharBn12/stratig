@@ -55,6 +55,8 @@ overbought = -25
 
 [exit]
 mode = "percent"
+follow_strategy = true
+strict = true
 
 [exit.atr]
 length = 7
