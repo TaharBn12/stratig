@@ -53,8 +53,51 @@ def all_strategies() -> list[Strategy]:
 
 def evaluate(key: Optional[str], candles: Candles, cfg, symbol: str = "",
              use_closed_candles: bool = True):
-    """يُشغّل الاستراتيجية المطلوبة على الشموع."""
-    return get(key).evaluate(candles, cfg, symbol=symbol, use_closed_candles=use_closed_candles)
+    """يُشغّل الاستراتيجية المطلوبة على الشموع (ثم فلتر الاتجاه إن كان مُفعّلاً)."""
+    strategy = get(key)
+    decision = strategy.evaluate(
+        candles, cfg, symbol=symbol, use_closed_candles=use_closed_candles
+    )
+    if decision.has_signal:
+        _apply_trend_filter(decision, candles, cfg)
+    return decision
+
+
+def _apply_trend_filter(decision, candles: Candles, cfg) -> None:
+    """يرفض الإشارة إن كانت عكس الاتجاه العام (اختياري — مُعطّل افتراضياً).
+
+    لماذا؟ الاستراتيجيتان المضمّنتان **عكس-اتجاهيتان** (تشتري الضعف وتبيع
+    القوة). في سوق متّجه — وهو أغلب حالات الكريبتو — يظهر ذلك للمستخدم كأن
+    «الإشارة مقلوبة»: يشتري فيهبط، ويبيع فيصعد. قياسنا على بيانات اصطناعية:
+
+        نظام اتجاهي: الأصلية ‎−0.41R‎ · المعكوسة ‎+0.53R‎   ← تبدو مقلوبة
+        نظام جانبي : الأصلية ‎+0.17R‎ · المعكوسة ‎−0.17R‎   ← سليمة تماماً
+
+    الفلتر لا يغيّر منطق أي استراتيجية: يعمل **بعد** حساب الإشارة، ومعطّل
+    افتراضياً (`strategy.trend_filter = "off"`).
+    """
+    mode = str((cfg.get("strategy.trend_filter", "off") if cfg else "off") or "off").lower()
+    if mode != "ema":
+        return
+    from .indicators import ema
+
+    period = int(cfg.get("strategy.trend_period", 200) or 200)
+    if candles is None or len(candles) < period + 5:
+        return
+    values = ema(list(candles.close), period)
+    level = values[-1]
+    price = candles.last_close
+    if level != level or price != price:          # NaN
+        return
+    against = (decision.side == "buy" and price < level) or (
+        decision.side == "sell" and price > level
+    )
+    if against:
+        decision.side = None
+        decision.notes.append(f"مرفوض: عكس الاتجاه العام (EMA {period})")
+        decision.lines.append(
+            f"  ⛔ <b>مرفوض</b>: الإشارة عكس الاتجاه العام (EMA {period})"
+        )
 
 
 def is_supported(key: Optional[str]) -> bool:

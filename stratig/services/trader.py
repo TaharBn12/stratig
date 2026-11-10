@@ -433,11 +433,62 @@ class Trader:
             f"الهدف: +{tp:g}% | الوقف: -{sl:g}%",
             f"⏳ تنتهي الإشارة بعد {mins} دقيقة",
         ]
+        freshness = self._signal_freshness(sig)
+        if freshness:
+            lines.append(freshness)
         if bool(self.cfg.get("safety.dry_run", False)):
             lines.append("\n🧪 وضع المحاكاة مفعّل — لن تُرسل أوامر حقيقية")
         else:
             lines.append(f"\n🔴 عند التأكيد يُرسل أمر حقيقي إلى {_esc(self.exchange.name)}")
         return "\n".join(lines)
+
+    def _signal_freshness(self, sig: "PendingSignal") -> str:
+        """/"كم تأخّرت عن سعر الإشارة؟" — الدخول المتأخر يقتل ميزة الإشارة."""
+        try:
+            current = float(self.exchange.mark_price(sig.symbol))
+        except Exception:  # pragma: no cover
+            return ""
+        if not current or not sig.price:
+            return ""
+        drift = abs(current - sig.price) / sig.price
+        _, sl_pct, _err = self._resolve_exits(sig)
+        if sl_pct <= 0:
+            return ""
+        ratio = drift / sl_pct
+        age = int(max(0.0, time.time() - sig.created_at) // 60)
+        if ratio < 0.25:
+            mark = "🟢 طازجة"
+        elif ratio < 0.75:
+            mark = "🟡 تأخّرت قليلاً"
+        else:
+            mark = "🔴 متأخّرة — السعر تحرّك كثيراً عن نقطة الإشارة"
+        return (
+            f"\n📍 السعر الآن <code>{_num(current)}</code> | انحراف "
+            f"{drift * 100:.2f}% ({ratio:.2f}× الوقف) · عمر الإشارة {age} د · {mark}"
+        )
+
+    def _stale_entry_error(self, sig: "PendingSignal") -> str:
+        """يرفض الدخول إن كان السعر قد تجاوز الإشارة بمقدار يُفقدها ميزتها."""
+        limit = float(self.cfg.get("execution.max_entry_drift", 1.0) or 0)
+        if limit <= 0:
+            return ""
+        try:
+            current = float(self.exchange.mark_price(sig.symbol))
+        except Exception:  # pragma: no cover
+            return ""
+        if not current or not sig.price:
+            return ""
+        drift = abs(current - sig.price) / sig.price
+        _, sl_pct, _err = self._resolve_exits(sig)
+        if sl_pct <= 0:
+            return ""
+        if drift / sl_pct <= limit:
+            return ""
+        return (
+            f"تحرّك السعر <b>{drift * 100:.2f}%</b> عن سعر الإشارة "
+            f"(<code>{limit:g}</code>× الوقف مسموح) — الدخول الآن متأخّر "
+            "ويفقد الإشارة ميزتها."
+        )
 
     def _signal_buttons(self, sig: PendingSignal):
         label = "✅ فتح صفقة شراء" if sig.side == BUY else "✅ فتح صفقة بيع"
@@ -506,6 +557,18 @@ class Trader:
         if blocked:
             await self.notifier.send(f"⛔ لم يتم فتح {sig.symbol}: {blocked}")
             return None
+
+        stale = self._stale_entry_error(sig)
+        if stale:
+            if bool(self.cfg.get("execution.block_stale_entry", False)):
+                sig.status = STATUS_SKIPPED
+                await self.notifier.send(
+                    f"⛔ لم يتم فتح <code>{_esc(sig.symbol)}</code>: {stale}\n"
+                    "للتجاوز: <code>/set block_stale false</code>"
+                )
+                return None
+            log.warning("[%s] دخول متأخّر: %s", sig.symbol, stale)
+            await self.notifier.send(f"⚠️ {stale}\n<i>سأفتحها كما طلبت.</i>")
 
         tp_pct, sl_pct, exit_error = self._resolve_exits(sig)
         if exit_error:

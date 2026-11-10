@@ -65,6 +65,20 @@ def _to_float(value) -> float:
         return NAN
 
 
+def _sort_by_time(rows: list) -> list:
+    """يرتّب الصفوف تصاعدياً بالوقت — ويتركها كما هي إن تعذّر الترتيب."""
+    if len(rows) < 2:
+        return rows
+    try:
+        first = float(rows[0][0])
+        last = float(rows[-1][0])
+    except (TypeError, ValueError, IndexError):
+        return rows
+    if first <= last:                      # مرتّبة أصلاً
+        return rows
+    return rows[::-1]
+
+
 def make_candles(raw, reverse: bool = False) -> Candles:
     """بناء Candles من مصفوفة المنصة.
 
@@ -76,6 +90,11 @@ def make_candles(raw, reverse: bool = False) -> Candles:
     rows = list(raw or [])
     if reverse:
         rows = rows[::-1]
+
+    # أمان إضافي: لا نثق بترتيب المنصة — نُرتّب تصاعدياً بالوقت دائماً.
+    # (Bybit يُعيد الأحدث أولاً، وBinance الأقدم أولاً، وأي تغيير في واجهة
+    #  المنصة كان كفيلاً بقلب كل الاستراتيجيات دون أن يظهر خطأ.)
+    rows = _sort_by_time(rows)
 
     times: list[float] = []
     opens: list[float] = []

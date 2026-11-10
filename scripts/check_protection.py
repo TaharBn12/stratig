@@ -120,7 +120,7 @@ def main() -> int:
     if unprotected:
         print(f"\n❌ يوجد {unprotected} صفقة بلا وقف خسارة على المنصة!")
         print("   أغلقها يدوياً أو أعد تشغيل البوت بعد تحديثه:")
-        print("     git pull && .venv\\Scripts\\python.exe -m pip install -r requirements.txt")
+        print(r"     git pull && .venv\\Scripts\\python.exe -m pip install -r requirements.txt")
     else:
         print("\n✅ كل صفقة مفتوحة عليها وقف خسارة مسجَّل في المنصة.")
     print(LINE)

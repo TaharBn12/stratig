@@ -611,3 +611,51 @@ def test_open_signal_refuses_when_exits_are_not_from_strategy(tmp_path):
     assert asyncio.run(trader.open_signal(sig.id)) is None
     assert not ex.calls                            # لم يُرسل أي أمر
 
+
+
+# ═══════════════════════ طزاجة الإشارة (الدخول المتأخّر) ═══════════════════════
+def test_signal_text_shows_price_drift_and_age(tmp_path):
+    """«اشتريت فهبط» سببه الشائع: دخول متأخّر — يجب أن يظهر للمستخدم."""
+    import time as _time
+
+    trader, ex = make_trader(tmp_path)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    text = trader._signal_text(sig)
+    assert "السعر الآن" in text and "عمر الإشارة" in text
+    assert "طازجة" in text or "تأخّرت" in text or "متأخّرة" in text
+
+
+def _move_market(trader, sig, factor: float) -> None:
+    """يُزيح سعر المنصة عن سعر الإشارة (محاكاة سوق تحرّك بعد الإشارة)."""
+    trader.exchange.mark_price = lambda symbol: sig.price * factor
+
+
+def test_stale_entry_warns_but_opens_by_default(tmp_path):
+    trader, ex = make_trader(tmp_path, execution__max_entry_drift=1.0)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    _move_market(trader, sig, 1.05)            # تحرّك 5% ≈ 5.5× الوقف
+    assert trader._stale_entry_error(sig)      # سبب واضح
+    assert asyncio.run(trader.open_signal(sig.id, notify_result=False)) is not None
+
+
+def test_stale_entry_blocked_when_enabled(tmp_path):
+    trader, ex = make_trader(
+        tmp_path, execution__max_entry_drift=1.0, execution__block_stale_entry=True
+    )
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    _move_market(trader, sig, 1.05)
+    assert asyncio.run(trader.open_signal(sig.id)) is None
+    assert not ex.calls                        # لم يُرسل أي أمر
+
+
+def test_fresh_entry_is_not_blocked(tmp_path):
+    trader, ex = make_trader(
+        tmp_path, execution__max_entry_drift=1.0, execution__block_stale_entry=True
+    )
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    assert trader._stale_entry_error(sig) == ""   # سعر المنصة = سعر الإشارة
+    assert asyncio.run(trader.open_signal(sig.id)) is not None

@@ -42,6 +42,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "candles": 500,
         "use_closed_candles": True,
         "require_both": True,
+        # فلتر الاتجاه (اختياري، مُعطّل افتراضياً حتى تبقى الاستراتيجيات حرفية)
+        # "off" = كماهي · "ema" = ارفض الإشارات المعاكسة للاتجاه العام
+        "trend_filter": "off",
+        "trend_period": 200,
         # ثوابت استراتيجية الدفتر 01_Strategy_Scalping_Modified_I (كما هي)
         "scalping_i": {
             "ema_slow": 50,
@@ -106,7 +110,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "request_delay": 0.2,
         "notify_no_signal": False,
     },
-    "execution": {"mode": "manual"},
+    "execution": {
+        # الصرامة: لا ندخل صفقة بعد أن يكون السعر قد تحرّك أكثر من
+        # (max_entry_drift × مسافة الوقف) عن سعر الإشارة — الإشارة القديمة
+        # فقدت ميزتها، والدخول المتأخر هو أشهر سبب لـ «اشتريت فهبط».
+        "max_entry_drift": 1.0,        # 1.0 = انحراف بمقدار وقف كامل
+        "block_stale_entry": False,    # true = ارفض الدخول، false = حذّر فقط
+        "mode": "manual",
+    },
     "safety": {"dry_run": False},
     "telegram": {"notify_startup": True, "notify_scan_summary": False, "language": "ar"},
 }
