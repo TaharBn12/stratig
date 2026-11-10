@@ -391,6 +391,13 @@ dry_run = false        # false = نفّذ أوامر حقيقية
 > `.venv\Scripts\python.exe scripts\check_protection.py`
 
 ### أهم الإعدادات (config.toml)
+
+> **`config.toml` ملف يخصّك فقط** — غير مُتتبَّع في git (مذكور في `.gitignore`)،
+> لأن البوت يحفظ إعداداتك فيه أثناء عمله (`/set`، `/live`، `/tf`…).
+> النسخة المرجعية على GitHub هي **`config.example.toml`**، فإن لم يوجد
+> `config.toml` نسخه البوت تلقائياً عند الإقلاع.
+> لا تضع أي مفتاح سرّي هنا — الأسرار في `.env`.
+
 | المسار | الافتراضي | المعنى |
 |---|---|---|
 | `strategy.timeframe` | `15m` | الإطار الزمني |
@@ -407,6 +414,36 @@ dry_run = false        # false = نفّذ أوامر حقيقية
 | `scanner.max_signals_per_scan` | `5` | أقصى إشارات في الفحص الواحد |
 | `execution.mode` | `manual` | `manual` (بتأكيدك) أو `auto` (تلقائي) |
 | `safety.dry_run` | `false` | محاكاة بدون أوامر حقيقية |
+
+---
+
+---
+
+## 🔄 التحديث (update.bat) — ولماذا كان يتعطّل
+
+```bat
+Ctrl+C          ← أوقف البوت في نافذة run.bat أولاً
+update.bat
+run.bat
+```
+
+> **مهم:** التحديث لا يظهر في بوت **شغّال** — بايثون حمّل الكود القديم في الذاكرة.
+> أوقف `run.bat` ثم شغّله من جديد.
+
+### خطأ: «Your local changes to config.toml would be overwritten by merge»
+كان سببه أن `config.toml` مُتتبَّع في git بينما البوت يكتب فيه باستمرار.
+أُصلح من الجذور:
+- `config.toml` **غير مُتتبَّع** الآن (و`config.example.toml` هو المرجع).
+- `update.bat` يحفظ نسخة `config.toml.mine` ويستعيدها تلقائياً بعد السحب —
+  فلا تضيع إعداداتك، ولا يتوقف التحديث.
+
+إن واجهته على نسخة قديمة، نفّذ مرة واحدة:
+```bat
+copy config.toml config.toml.mine
+git checkout -- config.toml
+git pull
+```
+ثم أعد `config.toml.mine` إن أردت قيماً خاصة (المفاتيح الجديدة تأتي من الإعدادات الافتراضية).
 
 ---
 

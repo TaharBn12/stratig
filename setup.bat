@@ -46,11 +46,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- 4) ملف الأسرار ---
-if exist ".env" (
-    echo [3/3] ملف .env موجود.
+REM --- 4) ملف الإعدادات ---
+if exist "config.toml" (
+    echo      ملف config.toml موجود ^(إعداداتك محفوظة^).
 ) else (
-    echo [3/3] جارٍ إنشاء ملف .env من المثال...
+    copy /Y config.example.toml config.toml >nul
+    echo      أنشأتُ config.toml من config.example.toml
+)
+
+REM --- 5) ملف الأسرار ---
+if exist ".env" (
+    echo [4/4] ملف .env موجود.
+) else (
+    echo [4/4] جارٍ إنشاء ملف .env من المثال...
     copy /Y .env.example .env >nul
     echo.
     echo  ****************************************************
