@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from stratig.config import Config, Secrets  # noqa: E402
 from stratig.utils import normalize_timeframe  # noqa: E402
 from stratig.data import Candles, make_candles  # noqa: E402
+from stratig import config as config_module  # noqa: E402
 from stratig.exchanges.base import (  # noqa: E402
     Balance,
     ExchangeBase,

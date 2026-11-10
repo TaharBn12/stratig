@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,6 +30,7 @@ except ModuleNotFoundError:  # بايثون أقدم: tomli الاختياري
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+EXAMPLE_CONFIG_PATH = PROJECT_ROOT / "config.example.toml"
 LEGACY_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
@@ -172,6 +174,14 @@ class Config:
 
         if not cfg_path.exists() and path is None and LEGACY_CONFIG_PATH.exists():
             cfg_path = LEGACY_CONFIG_PATH  # توافق مع النسخة القديمة (config.yaml)
+
+        # config.toml ملف محلي غير مُتتبَّع في git — إن غاب ننسخه من المثال
+        if not cfg_path.exists() and path is None and EXAMPLE_CONFIG_PATH.exists():
+            try:
+                shutil.copyfile(EXAMPLE_CONFIG_PATH, cfg_path)
+                log.info("أنشأتُ %s من config.example.toml", cfg_path.name)
+            except OSError as err:  # pragma: no cover
+                log.warning("تعذّر إنشاء %s: %s", cfg_path.name, err)
 
         data: dict[str, Any] = {}
         if cfg_path.exists():
