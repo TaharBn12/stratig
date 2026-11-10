@@ -106,6 +106,13 @@ def pnl_text(today: float, recent: float) -> str:
 
 def settings_text(cfg) -> str:
     g = cfg.get
+    try:
+        from ..strategy.registry import get as _get_strategy
+
+        _strategy = _get_strategy(g("strategy.name"))
+        strategy_line = f"<code>{esc(_strategy.key)}</code> — {esc(_strategy.title)}"
+    except Exception:  # pragma: no cover
+        strategy_line = f"<code>{esc(str(g('strategy.name')))}</code>"
     symbols_src = "تلقائي (أعلى الرموز نشاطاً)" if str(
         g("scanner.symbols_source", "auto")
     ).lower() == "auto" else "قائمة يدوية"
@@ -113,6 +120,7 @@ def settings_text(cfg) -> str:
         [
             "⚙️ <b>الإعدادات الحالية</b>",
             "",
+            f"الاستراتيجية: {strategy_line}",
             f"المنصة: <code>{esc(g('exchange.name'))}</code> | تيستنت: {g('exchange.testnet')}",
             f"الإطار الزمني: {g('strategy.timeframe')} | شموع مكتملة: {g('strategy.use_closed_candles')}",
             f"تأكيد مزدوج (RSI + W%R): {g('strategy.require_both')}",
@@ -126,6 +134,7 @@ def settings_text(cfg) -> str:
             f"فحص كل: {g('scanner.interval_seconds')} ث | مدة الإشارة: {int(g('scanner.signal_ttl_seconds', 0)) // 60} د",
             f"فترة السمومية: {int(g('scanner.cooldown_seconds', 0)) // 60} د | مصدر الرموز: {symbols_src}",
             "",
+            f"المخارج: {'ATR' if str(g('exit.mode', 'percent')).lower() == 'atr' else 'نسب ثابتة'}",
             f"وضع التنفيذ: {g('execution.mode')} | محاكاة: {g('safety.dry_run')}",
         ]
     )
@@ -151,6 +160,7 @@ def help_text() -> str:
             "🛡 /protect — هل كل صفقة عليها وقف خسارة حقيقي؟",
             "🔴 /live — تفعيل التنفيذ الحقيقي (الأوامر تُرسل للمنصة)",
             "🧪 /dryrun — وضع المحاكاة (تحليل بلا أوامر)",
+            "🧠 /strategy — عرض الاستراتيجيات والتبديل بينها فوراً",
             "⏱ /tf 5m — تغيير الإطار الزمني (يمسح السمومية فوراً)",
             "🔁 /reload — إعادة قراءة config.toml بعد تعديل يدوي",
             "🔒 /close BTCUSDT — إغلاق صفقة",

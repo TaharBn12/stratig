@@ -35,10 +35,25 @@ DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 DEFAULT_CONFIG: dict[str, Any] = {
     "exchange": {"name": "binance", "testnet": True},
     "strategy": {
+        "name": "rsi_williams",          # rsi_williams | scalping_i
         "timeframe": "15m",
         "candles": 500,
         "use_closed_candles": True,
         "require_both": True,
+        # ثوابت استراتيجية الدفتر 01_Strategy_Scalping_Modified_I (كما هي)
+        "scalping_i": {
+            "ema_slow": 50,
+            "ema_fast": 30,
+            "rsi_length": 10,
+            "bb_length": 15,
+            "bb_std": 1.5,
+            "bb_ddof": 1,
+            "atr_length": 7,
+            "atr_mode": "rma",
+            "backcandles": 7,
+            "sl_coef": 1.1,
+            "tp_sl_ratio": 1.5,
+        },
         "rsi": {"enabled": True, "period": 14, "oversold": 30, "overbought": 70, "lookback": 3},
         "williams_r": {
             "enabled": True,
@@ -49,6 +64,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "oversold": -75,
             "overbought": -25,
         },
+    },
+    "exit": {
+        "mode": "percent",              # percent | atr
+        "atr": {"length": 7, "sl_coef": 1.1, "tp_ratio": 1.5},
     },
     "trade": {
         "order_type": "market",

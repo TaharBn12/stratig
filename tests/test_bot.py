@@ -346,3 +346,45 @@ def test_scan_cycle_reloads_config_automatically(tmp_path):
     os.utime(tmp_path / "config.toml", (9_000_000_002, 9_000_000_002))
     asyncio.run(bot._run_scan_cycle())
     assert bot.cfg.get("strategy.timeframe") == "5m"
+
+
+# ═══════════════════════ تبديل الاستراتيجية ═══════════════════════
+def test_switch_strategy_is_immediate(tmp_path):
+    """/strategy scalping_i يجب أن يبدّل المنطق ووضع المخارج فوراً."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    assert trader.strategy_key == "rsi_williams"
+
+    text = bot._switch_strategy("scalping_i")
+
+    assert bot.cfg.get("strategy.name") == "scalping_i"
+    assert bot.cfg.get("exit.mode") == "atr"        # وضع الخروج يتبع الاستراتيجية
+    assert trader.strategy_key == "scalping_i"
+    assert "scalping_i" in text
+
+
+def test_switch_strategy_back_to_original_restores_percent(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    bot._switch_strategy("scalping_i")
+    bot._switch_strategy("rsi_williams")
+    assert bot.cfg.get("exit.mode") == "percent"
+
+
+def test_set_strategy_key_works(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, message = bot._apply_setting("strategy", "scalping_i")
+    assert ok is True
+    assert trader.strategy_key == "scalping_i"
+    assert "scalping_i" in message
+
+
+def test_set_strategy_rejects_unknown(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    ok, message = bot._apply_setting("strategy", "martingale")
+    assert ok is False
+    assert trader.strategy_key == "rsi_williams"
+
+
+def test_strategy_command_lists_all(tmp_path):
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    text = bot._strategy_text()
+    assert "rsi_williams" in text and "scalping_i" in text

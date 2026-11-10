@@ -4,10 +4,24 @@ name = "binance"
 testnet = true
 
 [strategy]
+name = "rsi_williams"
 timeframe = "15m"
 candles = 500
 use_closed_candles = false
 require_both = true
+
+[strategy.scalping_i]
+ema_slow = 50
+ema_fast = 30
+rsi_length = 10
+bb_length = 15
+bb_std = 1.5
+bb_ddof = 1
+atr_length = 7
+atr_mode = "rma"
+backcandles = 7
+sl_coef = 1.1
+tp_sl_ratio = 1.5
 
 [strategy.rsi]
 enabled = true
@@ -24,6 +38,14 @@ extreme_oversold = -99.5
 extreme_overbought = -0.5
 oversold = -75
 overbought = -25
+
+[exit]
+mode = "percent"
+
+[exit.atr]
+length = 7
+sl_coef = 1.1
+tp_ratio = 1.5
 
 [trade]
 order_type = "market"

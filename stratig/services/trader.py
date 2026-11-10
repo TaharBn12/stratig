@@ -11,7 +11,8 @@ from typing import Optional
 
 from ..config import Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
-from ..strategy.engine import Decision, evaluate
+from ..strategy.engine import Decision
+from ..strategy.registry import evaluate as strategy_evaluate, get as get_strategy
 from .notifier import Button, MessageRef, Notifier
 from ..utils import esc as _esc, num as _num
 
@@ -78,6 +79,15 @@ class Trader:
     # ═══════════════════ إعداد ═══════════════════
     def attach_notifier(self, notifier: Notifier) -> None:
         self.notifier = notifier
+
+    @property
+    def strategy_key(self) -> str:
+        """معرّف الاستراتيجية المُستخدمة الآن (من config.toml)."""
+        return get_strategy(self.cfg.get("strategy.name")).key
+
+    @property
+    def strategy(self):
+        return get_strategy(self.cfg.get("strategy.name"))
 
     @property
     def mode(self) -> str:
@@ -321,7 +331,9 @@ class Trader:
 
         try:
             df = await asyncio.to_thread(self.exchange.klines, symbol, timeframe, limit)
-            decision = evaluate(df, self.cfg, symbol=symbol, use_closed_candles=use_closed)
+            decision = strategy_evaluate(
+                self.strategy_key, df, self.cfg, symbol=symbol, use_closed_candles=use_closed
+            )
         except Exception as err:
             self.scan_failures += 1
             log.debug("[%s] تعذّر الحساب: %s", symbol, err)
@@ -393,6 +405,25 @@ class Trader:
         sig.ref = await self.notifier.send(self._signal_text(sig), self._signal_buttons(sig))
 
     # ═══════════════════ التنفيذ ═══════════════════
+    def _exit_percentages(self, sig: "PendingSignal") -> tuple[float, float]:
+        """يحدد نسبة الوقف والهدف: من ATR (حسب الاستراتيجية) أو من الإعدادات."""
+        tp_pct = float(self.cfg.get("trade.take_profit_pct", 0.012))
+        sl_pct = float(self.cfg.get("trade.stop_loss_pct", 0.009))
+        mode = str(self.cfg.get("exit.mode", "percent")).lower()
+        distance = sig.decision.sl_distance if sig.decision else None
+        target = sig.decision.tp_distance if sig.decision else None
+        if mode != "atr" or not distance or not sig.price:
+            return tp_pct, sl_pct
+        # الاستراتيجية تعطي المسافات بالسعر → نحوّلها إلى نسب من سعر الدخول
+        sl_pct = distance / sig.price
+        tp_pct = (target or distance * float(
+            self.cfg.get("exit.atr.tp_ratio", 1.5))) / sig.price
+        log.info(
+            "[%s] مخارج ATR: وقف %s (%.4g%%) | هدف %s (%.4g%%)",
+            sig.symbol, f"{distance:.6g}", sl_pct * 100, f"{(target or 0):.6g}", tp_pct * 100,
+        )
+        return tp_pct, sl_pct
+
     async def open_signal(self, signal_id: str, notify_result: bool = True) -> Optional[OrderResult]:
         sig = self.pending.get(signal_id)
         if sig is None:
@@ -409,14 +440,15 @@ class Trader:
             await self.notifier.send(f"⛔ لم يتم فتح {sig.symbol}: {blocked}")
             return None
 
+        tp_pct, sl_pct = self._exit_percentages(sig)
         try:
             result = await asyncio.to_thread(
                 self.exchange.open_market,
                 sig.symbol,
                 sig.side,
                 float(self.cfg.get("trade.qty_usdt", 50)),
-                float(self.cfg.get("trade.take_profit_pct", 0.012)),
-                float(self.cfg.get("trade.stop_loss_pct", 0.009)),
+                tp_pct,
+                sl_pct,
                 int(self.cfg.get("trade.leverage", 10)),
                 str(self.cfg.get("trade.margin_mode", "isolated")),
                 str(self.cfg.get("trade.tp_trigger", "mark_price")),
@@ -543,6 +575,7 @@ class Trader:
             "testnet": self.exchange.testnet,
             "dry_run": bool(self.cfg.get("safety.dry_run", False)),
             "timeframe": str(self.cfg.get("strategy.timeframe", "15m")),
+            "strategy": self.strategy_key,
             "last_scan": self.last_scan_at,
             "source": self.last_scan_source or self.symbols_source,
             "last_scan_duration": self.last_scan_duration,
