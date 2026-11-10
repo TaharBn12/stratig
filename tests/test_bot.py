@@ -388,3 +388,42 @@ def test_strategy_command_lists_all(tmp_path):
     bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
     text = bot._strategy_text()
     assert "rsi_williams" in text and "scalping_i" in text
+
+
+def test_strategy_button_falls_back_to_new_message(tmp_path):
+    """/strategy صار يعرض زرّاً، وإن رفض تليجرام تعديل رسالة قديمة نرسل رسالة جديدة."""
+    bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
+    kb = bot._strategy_keyboard()
+    buttons = [b for row in kb.inline_keyboard for b in row]
+    assert buttons and all(b.callback_data.startswith("strat:") for b in buttons)
+    assert [b.callback_data for b in buttons] == ["strat:scalping_i"]
+
+    sent: list[str] = []
+
+    class _Msg:
+        async def reply_text(self, text, **kwargs):
+            sent.append(text)
+
+    class _User:
+        id = 1
+
+    class _Query:
+        data = "strat:scalping_i"
+        message = _Msg()
+
+        async def answer(self, *a, **k):
+            pass
+
+        async def edit_message_text(self, *a, **k):
+            raise RuntimeError("Message can't be edited")   # رسالة قديمة >48 ساعة
+
+    class _Update:
+        def __init__(self, query):
+            self.callback_query = query
+            self.effective_user = _User()
+            self.effective_message = query.message
+
+    asyncio.run(bot._callback(_Update(_Query()), None))
+
+    assert trader.strategy_key == "scalping_i"       # التبديل نُفّذ فعلاً
+    assert sent and "scalping_i" in sent[0]          # وأُرسلت رسالة جديدة بديلاً
