@@ -96,7 +96,8 @@ def audit_config_paths() -> None:
     used: dict[str, list[str]] = {}
     # فقط استدعاءات كائن الإعدادات (cfg / config) لا أي dict آخر
     pattern = re.compile(
-        r"""\b(?:self\.)?(?:cfg|config|_cfg)\.(?:get|set)\(\s*["']([a-z0-9_.]+)["']""", re.I
+        r"""\b(?:self\.)?(?:cfg|config|_cfg)\.(?:get|set)\(\s*["']([a-z0-9_.]+)["']""",
+        re.I,
     )
     # ملفات الاختبار تُجرّب مسارات وهمية عمْداً — تُستثنى
     files = sorted(

@@ -279,3 +279,52 @@ def test_reload_repairs_timeframe(tmp_path):
     path.write_text('[strategy]\ntimeframe = "45m"\n', encoding="utf-8")
     cfg.reload()
     assert is_supported_timeframe(cfg.get("strategy.timeframe"))
+
+
+# ═══════════════════════ فلتر الاتجاه (اختياري) ═══════════════════════
+def _cfg(**over) -> Config:
+    return Config(over or {}, path=Path("config.toml"))
+
+
+def test_trend_filter_off_by_default_keeps_signals():
+    """الوضع الحرفي: لا يُرفض أي إشارة."""
+    from stratig.strategy.registry import evaluate as reg_evaluate
+
+    candles = make_candles(sign=1)
+    decision = reg_evaluate("rsi_williams", candles, _cfg(), use_closed_candles=False)
+    # لا نتحقق من وجود إشارة (تعتمد على البيانات) بل من غياب سبب الرفض
+    assert not any("عكس الاتجاه" in n for n in decision.notes)
+
+
+def test_trend_filter_rejects_counter_trend_signals():
+    """مع trend_filter=ema تُرفض الإشارة المعاكسة للاتجاه العام."""
+    from stratig.strategy.registry import evaluate as reg_evaluate
+    from stratig.strategy.indicators import ema
+
+    candles = make_candles(sign=1)
+    cfg = _cfg(**{"strategy": {"trend_filter": "ema", "trend_period": 50}})
+    decision = reg_evaluate("rsi_williams", candles, cfg, use_closed_candles=False)
+    if decision.has_signal:
+        level = ema(list(candles.close), 50)[-1]
+        price = candles.last_close
+        if decision.side == "buy":
+            assert price >= level
+        else:
+            assert price <= level
+    else:
+        assert any("عكس الاتجاه" in n for n in decision.notes) or decision.side is None
+
+
+def test_trend_filter_never_inverts_a_signal():
+    """الفلتر يرفض فقط — لا يقلب الاتجاه أبداً (مهم: لا انعكاس خفي)."""
+    from stratig.strategy.registry import evaluate as reg_evaluate
+
+    candles = make_candles(sign=1)
+    plain = reg_evaluate("rsi_williams", candles, _cfg(), use_closed_candles=False)
+    filtered = reg_evaluate(
+        "rsi_williams", candles,
+        _cfg(**{"strategy": {"trend_filter": "ema", "trend_period": 50}}),
+        use_closed_candles=False,
+    )
+    if plain.has_signal and filtered.has_signal:
+        assert plain.side == filtered.side
