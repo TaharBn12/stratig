@@ -17,6 +17,7 @@ from stratig.config import Config, Secrets
 from stratig.exchanges import build_exchange
 from stratig.logging_setup import setup_logging
 from stratig.services.trader import Trader
+from stratig.web.keepalive import KeepAlive
 
 log = logging.getLogger("stratig")
 
@@ -137,6 +138,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif bool(config.get("exchange.testnet", True)):
         log.info("تعمل على التيستنت: الأوامر حقيقية على محرك Binance التجريبي والأموال وهمية.")
+
+    # ── إبقاء الخدمة يقظة على Render (الخطة المجانية تنام بعد 15 دقيقة) ──
+    keep = KeepAlive.from_env(config)
+    if keep is not None:
+        keep.start()
+
     bot.run()
     return 0
 

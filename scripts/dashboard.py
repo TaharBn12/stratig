@@ -54,6 +54,13 @@ def main(argv: list[str] | None = None) -> int:
 
     dash = Dashboard(snapshot, host=host, port=port, token=token)
     dash.page = page
+    # نفس السلوك على Vercel: المتصفح يقرأ Supabase مباشرة. نُرسل المفتاح
+    # القابل للنشر فقط، فيبقى مفتاح الكتابة السرّي داخل الخدمة.
+    dash.public_config = {
+        "url": str(config.get("supabase.url", "") or ""),
+        "anon_key": str(config.get("supabase.anon_key", "") or ""),
+        "bot_id": str(config.get("supabase.bot_id", "default") or "default"),
+    }
     if not dash.start():
         print(f"❌ تعذّر تشغيل الخادم على {host}:{port} — المنفذ مشغول؟")
         return 1

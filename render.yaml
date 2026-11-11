@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ستراتيج على Render — «مخطط» (Blueprint) ينشر خدمتين بنقرة واحدة.
+#
+# الطريقة: Render → New → Blueprint → اختر هذا المستودع.
+# سيقرأ هذا الملف وينشئ الخدمتين، ثم يطلب منك قيم الأسرار (sync: false).
+#
+# ⚠️  ثلاث حقائق عن الخطة المجانية يجب أن تعرفها قبل النشر:
+#   1. لا يوجد «عامل خلفي» مجاني على Render — لذا البوت يعمل **خدمة ويب**
+#      (اللوحة داخله أصلاً، وتفتح منفذاً يراه Render).
+#   2. الخدمة المجانية **تنام بعد 15 دقيقة** بلا طلب. النبضة (KEEP_AWAKE)
+#      تمنع ذلك، وننصح بمراقب خارجي (UptimeRobot) كطبقة ثانية.
+#   3. **750 ساعة شهرياً لكل مساحة عمل** (مشاركة بين كل خدماتك المجانية).
+#      البوت المستيقظ دائماً يستهلك ~730 ساعة ⇐ اترك اللوحة تنام ولا تُبقِها
+#      يقظة، وإلا تجاوزت الحصة وتوقّفت الخدمتان حتى أول الشهر.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ═══════════════ 1. البوت (مع اللوحة داخله) ═══════════════
+  - type: web
+    name: stratig-bot
+    runtime: docker
+    plan: free
+    region: frankfurt          # أقرب منطقة لشمال أفريقيا (وأقرب لـ Supabase)
+    healthCheckPath: /api/health
+    dockerCommand: python main.py
+
+    envVars:
+      # ── المنصة: تيستنت (أموال وهمية) — لا تُغيّرها إلا بوعي ──
+      - key: EXCHANGE
+        value: binance
+      - key: TESTNET
+        value: "true"
+      # ── إبقاء الخدمة يقظة (الخطة المجانية تنام بعد 15 دقيقة) ──
+      - key: KEEP_AWAKE
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+
+      # ── تمييز هذا البوت عن غيره في نفس مشروع Supabase ──
+      - key: SUPABASE_BOT_ID
+        value: render
+
+      # ── أسرار: Render يطلبها منك عند النشر ولا تُحفظ في Git ──
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_IDS
+        sync: false
+      - key: BINANCE_TESTNET_API_KEY
+        sync: false
+      - key: BINANCE_TESTNET_API_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY          # مفتاح service — للكتابة فقط، لا يُكشَف
+        sync: false
+      - key: SUPABASE_ANON_KEY     # مفتاح مقروء — يراه المتصفح في /api/config
+        sync: false
+      - key: WEB_TOKEN             # رمز حماية اللوحة — اتركه فارغاً إن شئت
+        sync: false
+
+  # ═══════════════ 2. اللوحة وحدها (للقراءة، بلا تداول) ═══════════════
+  # تقرأ من Supabase لا من قرصها (المؤقّت) — لذا تعمل حتى والبوت نائماً.
+  # اتركها تنام: تُستهلك ساعات فقط حين تزورها.
+  - type: web
+    name: stratig-dashboard
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    dockerCommand: python scripts/dashboard.py
+
+    envVars:
+      - key: SUPABASE_BOT_ID
+        value: render
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: WEB_TOKEN
+        sync: false

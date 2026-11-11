@@ -31,7 +31,8 @@ def default_page() -> Path:
 class _Handler(BaseHTTPRequestHandler):
     """يعرض صفحة واحدة وثلاث نقاط JSON."""
 
-    getter: GetSnapshot = lambda: {}  # type: ignore[assignment]
+    getter: GetSnapshot = lambda: {}   # type: ignore[assignment]
+    public_config: dict = {}           # ما يُكشَف للمتصفح في /api/config
     auth_token: str = ""
     page: Path | None = None
 
@@ -76,6 +77,20 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as err:
                 log.warning("[web] فشل بناء اللقطة: %s", err)
                 self._json({"error": str(err)}, 500)
+        elif path == "/api/config":
+            # الإعدادات التي يحتاجها المتصفح ليقرأ Supabase مباشرة.
+            # نُرسل المفتاح «القابل للنشر» فقط — ولا نكشف مفتاح service أبداً:
+            # إن لم يُضبط anon_key نُعيد فراغاً فتعمل اللوحة بالوضع المحلي.
+            # «public» لا «cfg»: هذه حمولة صغيرة مُعدّة للمتصفح، ليست
+            # كائن الإعدادات — والتدقيق يمسح استدعاءات cfg.get/set.
+            public = _Handler.public_config or {}
+            url = str(public.get("url", "") or "")
+            key = str(public.get("anon_key", "") or "")
+            if url and key:
+                self._json({"url": url, "key": key,
+                            "botId": str(public.get("bot_id", "default") or "default")})
+            else:
+                self._json({"url": "", "key": "", "botId": ""})
         elif path == "/api/health":
             self._json({"ok": True})
         else:
@@ -105,6 +120,7 @@ class Dashboard:
         # 0 منفذ صالح («اختر منفذاً متاحاً») — لذا لا نستخدم `or` هنا
         self.port = 8000 if port is None else int(port)
         self.token = str(token or "")
+        self.public_config: dict = {}
         self.page = None
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
@@ -125,9 +141,10 @@ class Dashboard:
             return False
 
         handler_cls = self.server.RequestHandlerClass
-        handler_cls.getter = staticmethod(self._getter)  # type: ignore[attr-defined]
-        handler_cls.auth_token = self.token             # type: ignore[attr-defined]
-        handler_cls.page = self.page                    # type: ignore[attr-defined]
+        handler_cls.getter = staticmethod(self._getter)        # type: ignore[attr-defined]
+        handler_cls.public_config = dict(self.public_config)   # type: ignore[attr-defined]
+        handler_cls.auth_token = self.token                    # type: ignore[attr-defined]
+        handler_cls.page = self.page                           # type: ignore[attr-defined]
 
         # المنفذ 0 = «اختر منفذاً متاحاً» — يفيد الاختبارات ويمنع التصادم
         self.port = int(self.server.server_address[1])
