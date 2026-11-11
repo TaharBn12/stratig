@@ -52,7 +52,22 @@
     <span id="mode" class="badge">…</span>
     <span id="net" class="badge">…</span>
     <span id="age" class="badge">…</span>
+    <button id="setupBtn">⚙️ الإعداد</button>
   </header>
+
+  <div id="setup" class="card" style="display:none;margin-bottom:16px">
+    <div class="k">اربط اللوحة بـ Supabase — تُحفظ الإعدادات في هذا المتصفح فقط</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <input id="inUrl" placeholder="https://xxxx.supabase.co">
+      <input id="inKey" placeholder="المفتاح القابل للنشر (anon)">
+      <input id="inBot" placeholder="bot_id">
+      <button id="saveBtn">حفظ</button>
+    </div>
+    <div class="k" style="margin-top:8px">
+      المفتاح يبقى في متصفحك ولا يُرسل إلا إلى Supabase. استخدم المفتاح
+      <b>القابل للنشر</b> لا السرّي — الأول يملك قراءة فقط.
+    </div>
+  </div>
 
   <div class="grid" id="kpis"></div>
 
@@ -262,11 +277,41 @@ async function tick() {
       `<span class="down">تعذّر جلب البيانات: ${err.message}</span>`;
     document.getElementById("src").textContent = "غير متصل";
     document.getElementById("src").className = "badge off";
+    // لا يوجد خادم محلي ولا إعدادات محفوظة → اعرض لوحة الإعداد
+    if (!CFG.url) document.getElementById("setup").style.display = "block";
   }
+}
+
+/* ── لوحة الإعداد (تعمل حتى بفتح الملف مباشرة بلا أي خادم) ── */
+function openSetup() {
+  const p = document.getElementById("setup");
+  p.style.display = p.style.display === "none" ? "block" : "none";
+  document.getElementById("inUrl").value = CFG.url || "";
+  document.getElementById("inKey").value = CFG.key || "";
+  document.getElementById("inBot").value = BOT || CFG.botId || "";
+}
+
+function saveSetup() {
+  CFG.url = document.getElementById("inUrl").value.trim().replace(/\/+$/, "");
+  CFG.key = document.getElementById("inKey").value.trim();
+  CFG.botId = document.getElementById("inBot").value.trim() || "default";
+  localStorage.setItem("stratig_url", CFG.url);
+  localStorage.setItem("stratig_key", CFG.key);
+  localStorage.setItem("stratig_bot", CFG.botId);
+  document.getElementById("setup").style.display = "none";
+  tick();
 }
 
 (async function start() {
   CFG = await loadConfig();
+  // لا يوجد خادم وظائف (مثلاً فتحت الملف مباشرة) → الإعدادات من المتصفح
+  if (!CFG.url) {
+    CFG.url = localStorage.getItem("stratig_url") || "";
+    CFG.key = localStorage.getItem("stratig_key") || "";
+    CFG.botId = localStorage.getItem("stratig_bot") || "default";
+  }
+  document.getElementById("setupBtn").onclick = openSetup;
+  document.getElementById("saveBtn").onclick = saveSetup;
   await tick();
   setInterval(tick, REFRESH_MS);
 })();
