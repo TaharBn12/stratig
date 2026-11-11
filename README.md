@@ -244,9 +244,28 @@ dashboard.bat
 ```
 ثم `/dashboard` يعطيك الرابط.
 
-### 2) من هاتفك في أي مكان (Supabase + Vercel)
+### 2) بدون استضافة إطلاقاً — افتح الملف مباشرة
+انسخ `dashboard/index.html` إلى أي مكان على جهازك وافتحه بالنقر المزدوج.
+اضغط **⚙️ الإعداد** وأدخل رابط Supabase ومفتاحه القابل للنشر — تُحفظ
+الإعدادات في متصفحك فقط. هكذا ترى بيانات بوتك من أي متصفح بلا خادم
+وبلا حساب استضافة.
+
+### 3) رابط دائم على Vercel
 بوتك يعمل خلف موجّه (NAT) فلا تستطيع فتح منفذ للعالم. الحل: البوت
 **يدفع** بياناته إلى Supabase، ولوحة Vercel تقرأها من هناك.
+
+**مرة واحدة فقط** (من موقع Vercel):
+1. <https://vercel.com/new> ← import من GitHub ← اختر `TaharBn12/stratig`
+2. **Root Directory** = `dashboard` · **Framework** = Other · **Build** = فارغ
+3. Environment Variables:
+   ```
+   SUPABASE_URL        = https://xxxx.supabase.co
+   SUPABASE_ANON_KEY   = المفتاح القابل للنشر (anon)
+   BOT_ID              = default
+   ```
+4. Deploy
+
+> بعدها كل `update.bat` يحدّث اللوحة تلقائياً، لأن المشروع مربوط بالمستودع.
 
 ```toml
 # في config.toml (ملفك المحلي، لا يُرفع إلى git)
