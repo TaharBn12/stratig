@@ -132,6 +132,13 @@ class Trader:
             port=int(self.cfg.get("web.port", 8000)),
             token=str(self.cfg.get("web.token", "") or ""),
         )
+        # المتصفح يقرأ Supabase مباشرة من /api/config — بالمفتاح القابل
+        # للنشر فقط (إن وُجد)، لا بمفتاح الكتابة السرّي.
+        self.dashboard.public_config = {
+            "url": str(self.cfg.get("supabase.url", "") or ""),
+            "anon_key": str(self.cfg.get("supabase.anon_key", "") or ""),
+            "bot_id": str(self.cfg.get("supabase.bot_id", "default") or "default"),
+        }
         if self.dashboard.start():
             log.info("🔎 لوحة التحكم: %s", self.dashboard.url)
         else:

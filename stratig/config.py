@@ -190,6 +190,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,
         "url": "",                   # https://xxxx.supabase.co
         "key": "",                   # المفتاح السرّي (service) — للكتابة فقط
+        # مفتاح «قابل للنشر» (anon) — يقرأه المتصفح من /api/config فقط.
+        # لا تضع فيه مفتاح service أبداً: الحماية الحقيقية هي RLS.
+        "anon_key": "",
         "bot_id": "default",         # يميّز أكثر من بوت في نفس المشروع
         "push_interval_seconds": 60,
     },
@@ -306,8 +309,18 @@ class Config:
         print(f"⚠️  صيغة غير مدعومة لملف الإعدادات: {path.name}")
         return {}
 
+    @staticmethod
+    def _env_flag(value: str | None, default: bool = False) -> bool:
+        """يفهم صيغ البوليان الشائعة في متغيرات البيئة."""
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if not text:
+            return default
+        return text in ("1", "true", "yes", "on")
+
     def _apply_env_overrides(self) -> None:
-        """متغيرات البيئة تطغى على الملف (مفيد في Docker)."""
+        """متغيرات البيئة تطغى على الملف (مفيد في Docker و Render)."""
         name = os.getenv("EXCHANGE")
         if name:
             self.set("exchange.name", name.strip().lower())
@@ -317,6 +330,42 @@ class Config:
         dry = os.getenv("DRY_RUN")
         if dry is not None:
             self.set("safety.dry_run", dry.strip().lower() in ("1", "true", "yes", "on"))
+
+        # ── المنصّات السحابية (Render · Railway · Heroku) تمرّر المنفذ في PORT ──
+        # وجود PORT يعني «نحن على منصّة»: بلا منفذ مفتوح يفشل النشر أصلاً،
+        # لذا نشغّل اللوحة وجوباً ولو كانت مُعطَّلة في الملف.
+        port = (os.getenv("PORT") or "").strip()
+        if port.isdigit():
+            self.set("web.enabled", True)
+            self.set("web.port", int(port))
+        host = os.getenv("WEB_HOST")
+        if host:
+            self.set("web.host", host.strip())
+        token = os.getenv("WEB_TOKEN")
+        if token is not None:
+            self.set("web.token", token.strip())
+        web_on = os.getenv("WEB_ENABLED")
+        if web_on is not None:
+            self.set("web.enabled", self._env_flag(web_on, True))
+
+        # ── Supabase: الحالة المشتركة بين البوت واللوحة (قرص Render مؤقّت!) ──
+        sb_url = os.getenv("SUPABASE_URL")
+        if sb_url:
+            self.set("supabase.url", sb_url.strip())
+        sb_key = os.getenv("SUPABASE_KEY")
+        if sb_key:
+            self.set("supabase.key", sb_key.strip())
+        sb_id = os.getenv("SUPABASE_BOT_ID")
+        if sb_id:
+            self.set("supabase.bot_id", sb_id.strip())
+        # المفتاح الذي يراه المتصفح — يُقرأ فقط، ولا يُستبدل بمفتاح service
+        sb_anon = os.getenv("SUPABASE_ANON_KEY")
+        if sb_anon:
+            self.set("supabase.anon_key", sb_anon.strip())
+        sb_on = os.getenv("SUPABASE_ENABLED")
+        # وجود الرابط والمفتاح يكفي للتشغيل — لا نطلب متغيراً ثالثاً
+        auto = bool(self.get("supabase.url")) and bool(self.get("supabase.key"))
+        self.set("supabase.enabled", self._env_flag(sb_on, auto))
 
     def _save_quietly(self) -> None:
         """حفظ دون إيقاف البوت إن تعذّر الكتابة (ملف للقراءة فقط مثلاً)."""
