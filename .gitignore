@@ -18,6 +18,12 @@ __pycache__/
 data/*
 !data/requests/
 
+# تقارير التشغيل (ملفات عمل، لا تُرفع)
+part_*.json
+part_*.log
+validate_out.txt
+validate_report.json
+
 # بيانات وقت التشغيل
 # config.toml ملف محلي يخصّك (البوت يحفظ إعداداتك فيه) — لا يُرفع للـ git
 # حتى لا يتعارض مع update.bat. النسخة المرجعية: config.example.toml
