@@ -12,6 +12,9 @@ from typing import Optional
 
 from ..config import PROJECT_ROOT, Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
+from ..web.server import Dashboard
+from ..web.snapshot import build_snapshot
+from ..web.supabase import SupabaseSync
 from ..strategy.filters import apply_filters
 from ..strategy.indicators import adx, atr_pct, ema
 from ..strategy.engine import Decision
@@ -106,12 +109,59 @@ class Trader:
             journal_path = PROJECT_ROOT / journal_path
         self.journal = Journal(journal_path, limit=int(config.get("risk.journal_limit", 1000)))
         self._risk_reason = ""            # آخر سبب منعه التداول
+        # ── لوحة التحكم + الرفع إلى Supabase (اختياريان، معطّلان افتراضياً) ──
+        self._supabase = SupabaseSync.from_config(config)
+        self._last_push = 0.0
+        self._pushed_trades = 0
+        self.dashboard = None
+        if bool(config.get("web.enabled", False)):
+            self._start_dashboard()
         self._last_qty: dict[str, tuple[float, float]] = {}
         self._opened_meta: dict[str, dict] = {}   # بيانات الصفقة لإدارة المخاطر لاحقاً
         self._managed_sl: dict[str, float] = {}   # آخر وقف ضبطناه لكل رمز
         self._sync_risk()
 
     # ═══════════════════ إعداد ═══════════════════
+    # ═══════════════════════ لوحة التحكم ═══════════════════════
+    def _start_dashboard(self) -> None:
+        """يُشغّل خادم اللوحة في خيط خلفي — لا يوقف البوت إن فشل."""
+        self.dashboard = Dashboard(
+            self.snapshot,
+            host=str(self.cfg.get("web.host", "0.0.0.0")),
+            port=int(self.cfg.get("web.port", 8000)),
+            token=str(self.cfg.get("web.token", "") or ""),
+        )
+        if self.dashboard.start():
+            log.info("🔎 لوحة التحكم: %s", self.dashboard.url)
+        else:
+            self.dashboard = None
+
+    def snapshot(self) -> dict:
+        """اللقطة الموحّدة — تستخدمها اللوحة المحلية والسحابية."""
+        return build_snapshot(self, self.cfg,
+                              bot_id=str(self.cfg.get("supabase.bot_id", "default")),
+                              live=True)
+
+    def push_to_supabase(self, force: bool = False) -> None:
+        """يدفع اللقطة + الصفقات الجديدة — يُستدعى من دورة الفحص."""
+        if not self._supabase.enabled:
+            return
+        now = time.time()
+        gap = float(self.cfg.get("supabase.push_interval_seconds", 60) or 60)
+        if not force and (now - self._last_push) < gap:
+            return
+        self._last_push = now
+        try:
+            snap = self.snapshot()
+            self._supabase.push_state(snap)
+            rows = snap.get("trades", [])
+            if len(rows) > self._pushed_trades:
+                new_rows = rows[:len(rows) - self._pushed_trades]
+                if self._supabase.push_trades(new_rows):
+                    self._pushed_trades = len(rows)
+        except Exception as err:  # pragma: no cover
+            log.debug("[supabase] تعذّر الرفع: %s", err)
+
     def attach_notifier(self, notifier: Notifier) -> None:
         self.notifier = notifier
 

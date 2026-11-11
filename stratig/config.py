@@ -158,6 +158,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "safety": {"dry_run": False},
     "telegram": {"notify_startup": True, "notify_scan_summary": False, "language": "ar"},
+    # ── لوحة التحكم المحلية (خادم على جهازك) ──
+    # لا تحتاج مفاتيح المنصة: تعمل أيضاً بقراءة سجل الصفقات من القرص
+    "web": {
+        "enabled": False,
+        "host": "0.0.0.0",
+        "port": 8000,
+        "token": "",                 # فارغ = بلا حماية على الشبكة المحلية
+    },
+    # ── الرفع إلى Supabase (للوصول من الهاتف في أي مكان) ──
+    "supabase": {
+        "enabled": False,
+        "url": "",                   # https://xxxx.supabase.co
+        "key": "",                   # المفتاح السرّي (service) — للكتابة فقط
+        "bot_id": "default",         # يميّز أكثر من بوت في نفس المشروع
+        "push_interval_seconds": 60,
+    },
 }
 
 
