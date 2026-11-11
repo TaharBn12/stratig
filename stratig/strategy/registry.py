@@ -197,7 +197,7 @@ def check_config(cfg) -> list[str]:
 
 
 # ─────────────────── تسجيل الاستراتيجيات المضمّنة ───────────────────
-from . import engine, scalping_i   # noqa: E402
+from . import engine, lab, scalping_i   # noqa: E402
 
 register(
     Strategy(
@@ -220,6 +220,55 @@ register(
         evaluate=scalping_i.evaluate,
         source="01_Strategy_Scalping_Modified_I.ipynb — مطبَّقة حرفياً",
         min_candles=scalping_i.MIN_CANDLES,
+    )
+)
+
+# ── استراتيجيات مرشّحة (مضافة — لا تُغيّر أي استراتيجية قائمة) ──
+register(
+    Strategy(
+        key=lab.MEAN_REVERSION_Z,
+        title="ارتداد إلى المتوسط (z-score)",
+        description="اشترِ عند انخفاض السعر انحرافين تحت متوسطه. نظامها: نطاق جانبي.",
+        exit_mode="atr",
+        evaluate=lab.evaluate_z,
+        source="مُضافة للبحث عن ميزة — stratig/strategy/lab.py",
+        min_candles=40,
+    )
+)
+
+register(
+    Strategy(
+        key=lab.RSI_REVERSION,
+        title="ارتداد RSI (مؤشر واحد)",
+        description="نسخة أبسط من الأصلية: RSI وحده بلا تأكيد مزدوج ⇒ عيّنة أكبر.",
+        exit_mode="atr",
+        evaluate=lab.evaluate_rsi,
+        source="مُضافة للبحث عن ميزة — stratig/strategy/lab.py",
+        min_candles=40,
+    )
+)
+
+register(
+    Strategy(
+        key=lab.DONCHIAN_BREAKOUT,
+        title="اختراق دونشيان",
+        description="كسر أعلى قمة في N شمعة ⇒ شراء. نظامها: اتجاه قوي.",
+        exit_mode="atr",
+        evaluate=lab.evaluate_donchian,
+        source="مُضافة للبحث عن ميزة — stratig/strategy/lab.py",
+        min_candles=40,
+    )
+)
+
+register(
+    Strategy(
+        key=lab.EMA_MOMENTUM,
+        title="زخم المتوسطات (EMA)",
+        description="المتوسط السريع فوق البطيء والسعر فوقه ⇒ اشترِ. نظامها: اتجاه قوي.",
+        exit_mode="atr",
+        evaluate=lab.evaluate_momentum,
+        source="مُضافة للبحث عن ميزة — stratig/strategy/lab.py",
+        min_candles=40,
     )
 )
 

@@ -78,8 +78,12 @@ EXIT_GRID: dict[str, list] = {
 # exit.mode = "atr" (حينها تُستخدم مسافات الاستراتيجية). مع "percent" تُستخدم
 # النسب الثابتة وحدها — وأي بحث على sl_coef هناك يجرّب معاملات بلا أثر.
 EXIT_MODE: dict[str, str] = {
-    "scalping_i": "atr",        # مخارج من ATR الاستراتيجية
-    "rsi_williams": "percent",  # نسب ثابتة
+    "scalping_i": "atr",             # مخارج من ATR الاستراتيجية
+    "rsi_williams": "percent",       # نسب ثابتة
+    "mean_reversion_z": "atr",       # الاستراتيجيات المرشّحة كلها ATR
+    "rsi_reversion": "atr",
+    "donchian_breakout": "atr",
+    "ema_momentum": "atr",
 }
 
 # هل تملك الاستراتيجية نسب خروج خاصة تُغني عن النسب العامة؟
