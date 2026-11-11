@@ -74,6 +74,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "tp_sl_ratio": 1.5,
         },
         "rsi": {"enabled": True, "period": 14, "oversold": 30, "overbought": 70, "lookback": 3},
+        # ── استراتيجيات مرشّحة (مضافة، اختيارية، لا تُغيّر القائمة) ──
+        "mean_reversion_z": {"length": 20, "entry_z": 2.0, "exit_z": 0.5,
+                             "atr_length": 14, "sl_coef": 1.5, "tp_ratio": 1.5},
+        "rsi_reversion": {"period": 14, "oversold": 25.0, "overbought": 75.0,
+                          "atr_length": 14, "sl_coef": 1.5, "tp_ratio": 1.5},
+        "donchian_breakout": {"length": 20, "atr_length": 14,
+                              "sl_coef": 2.0, "tp_ratio": 2.0},
+        "ema_momentum": {"fast": 9, "slow": 21, "atr_length": 14,
+                         "sl_coef": 2.0, "tp_ratio": 2.0},
         "williams_r": {
             "enabled": True,
             "lbp": 24,

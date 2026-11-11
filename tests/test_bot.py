@@ -393,11 +393,19 @@ def test_strategy_command_lists_all(tmp_path):
 
 def test_strategy_button_falls_back_to_new_message(tmp_path):
     """/strategy صار يعرض زرّاً، وإن رفض تليجرام تعديل رسالة قديمة نرسل رسالة جديدة."""
+    from stratig.strategy.registry import all_strategies, is_supported
+
     bot, trader, exchange = make_bot_with_config(tmp_path, dry=False)
     kb = bot._strategy_keyboard()
     buttons = [b for row in kb.inline_keyboard for b in row]
     assert buttons and all(b.callback_data.startswith("strat:") for b in buttons)
-    assert [b.callback_data for b in buttons] == ["strat:scalping_i"]
+
+    # كل زرّ استراتيجية **معروفة** في السجل، والحالية مستثناة
+    # (لا نُثبّت عدداً: كلما أُضيفت استراتيجية يزيد عدد الأزرار)
+    keys = [b.callback_data.split(":", 1)[1] for b in buttons]
+    assert all(is_supported(key) for key in keys)
+    assert trader.strategy_key not in keys
+    assert set(keys) == {s.key for s in all_strategies()} - {trader.strategy_key}
 
     sent: list[str] = []
 

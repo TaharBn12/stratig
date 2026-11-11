@@ -59,6 +59,36 @@ oversold = 30
 overbought = 70
 lookback = 3
 
+# ── استراتيجيات المختبر (اختيارية — تُبدَّل بـ /strategy) ──
+[strategy.mean_reversion_z]
+length = 20
+entry_z = 2.0
+exit_z = 0.5
+atr_length = 14
+sl_coef = 1.5
+tp_ratio = 1.5
+
+[strategy.rsi_reversion]
+period = 14
+oversold = 25.0
+overbought = 75.0
+atr_length = 14
+sl_coef = 1.5
+tp_ratio = 1.5
+
+[strategy.donchian_breakout]
+length = 20
+atr_length = 14
+sl_coef = 2.0
+tp_ratio = 2.0
+
+[strategy.ema_momentum]
+fast = 9
+slow = 21
+atr_length = 14
+sl_coef = 2.0
+tp_ratio = 2.0
+
 [strategy.williams_r]
 enabled = true
 lbp = 24
