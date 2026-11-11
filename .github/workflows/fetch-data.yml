@@ -27,7 +27,7 @@ on:
         default: "4"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   fetch:
@@ -59,7 +59,19 @@ jobs:
             head -2 "$OUT"; tail -1 "$OUT"
             # البيانات مضغوطة ومشفّرة base64: بيئة التطوير لا تصل إلى
             # خوادم الـ artifacts، فنمرّرها عبر السجل.
-            echo "=== BEGIN $SYM-$TF ==="
-            gzip -9 -c "$OUT" | base64 -w 120
-            echo "=== END $SYM-$TF ==="
           done
+
+      # بيئة التطوير لا تصل إلى خوادم الـ artifacts ولا إلى السجل
+      # (كلاهما خارج github.com المحجوب جزئياً)، فالنتيجة تُودَع في الفرع
+      # نفسه ويُسحبها المطوّر بـ git pull.
+      - name: حفظ النتيجة في الفرع
+        run: |
+          set -euo pipefail
+          git config user.name  "stratig-data-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -f data/*.csv
+          if git diff --cached --quiet; then
+            echo "لا جديد"; exit 0
+          fi
+          git commit -m "📊 بيانات شموع حقيقية (OKX)"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
