@@ -14,7 +14,8 @@ __pycache__/
 !.env.example
 
 # بيانات الشموع المُجلَبة (scripts/fetch_candles.py) — ملفات عمل، لا تُرفع
-data/
+# (data/* لا data/: كي نستطيع استثناء مجلد الطلبات بعده)
+data/*
 !data/requests/
 
 # بيانات وقت التشغيل

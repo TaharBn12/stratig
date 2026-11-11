@@ -32,9 +32,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from stratig.config import Config                        # noqa: E402
+from stratig.config import DEFAULT_CONFIG, Config        # noqa: E402
 from stratig.data import Candles, make_candles           # noqa: E402
 from stratig.edge import bonferroni_z, measure           # noqa: E402
+from stratig.strategy.indicators import atr_pct         # noqa: E402
 from scripts.backtest import synthetic_series            # noqa: E402
 from scripts.optimize import (                           # noqa: E402
     base_config,
@@ -45,6 +46,49 @@ from scripts.optimize import (                           # noqa: E402
 # أدنى عدد نوافذ لقياس «الثبات». نافذة أو ثلاث لا تقيس التكرار:
 # ثبات 67% على 3 نوافذ يعني «2 من 3» — أي قرعة. خمس نوافذ حدٌّ أدنى.
 MIN_WINDOWS = 5
+
+# عمولة العقود الآجلة لكل جهة (taker, أعلى شريحة للمستخدم العادي):
+# Binance 0.05% · Bybit 0.055% · OKX 0.05%. الذهاب والعودة = الضعف.
+DEFAULT_FEE_PCT = 0.0005
+
+
+def fee_drag_r(series: list[Candles], strategy: str, params: dict,
+               *, fee_pct: float = DEFAULT_FEE_PCT) -> float:
+    """كم R تستهلك العمولة في الصفقة الواحدة؟
+
+    R = بُعد الوقف = sl_coef × ATR. فالعمولة بوحدة R هي:
+
+        fee_r = (2 × نسبة العمولة) ÷ (بُعد الوقف كنسبة من السعر)
+
+    مثال: وقف عند 1.5% من السعر وعمولة 0.05% لكل جهة ⇒
+    0.001 ÷ 0.015 = 0.067R تستهلكها العمولة من كل صفقة. استراتيجية
+    توقّعها 0.05R خامّاً إذن **خاسرة** بعد العمولة وإن بدت رابحة.
+    """
+    if not series or fee_pct <= 0:
+        return 0.0
+    defaults = (DEFAULT_CONFIG.get("strategy", {}).get(strategy) or {})
+    sl_coef = float(params.get(f"strategy.{strategy}.sl_coef",
+                               defaults.get("sl_coef", 1.5)) or 1.5)
+    atr_length = int(params.get(f"strategy.{strategy}.atr_length",
+                                defaults.get("atr_length", 14)) or 14)
+
+    stops: list[float] = []
+    for candles in series:
+        if len(candles) < atr_length + 5:
+            continue
+        for index in range(atr_length + 2, len(candles), max(1, len(candles) // 40)):
+            window = candles.slice(max(0, index - 200), index)
+            value = atr_pct(list(window.high), list(window.low),
+                            list(window.close), atr_length,
+                            price=window.last_close)
+            if value == value and value > 0:
+                stops.append(value)
+    if not stops:
+        return 0.0
+    stop_pct = statistics.fmean(stops) * sl_coef
+    if stop_pct <= 0:
+        return 0.0
+    return (2 * fee_pct) / stop_pct
 
 # مرجع للمقارنة فقط: الاستراتيجيتان الموجودتان أصلاً. ليستا من المرشّحين
 # (لا تدخلان في تصحيح بونفيروني) — الغرض أن ترى: هل الجديد أفضل من الذي
@@ -105,6 +149,8 @@ class Result:
     window_stats: object = None
     accepted: bool = False
     thin: bool = False                 # هامش خارج العينة داخل ضجيج التكلفة
+    fee_r: float = 0.0                 # تكلفة الصفقة ذهاباً وإياباً بوحدة R
+    net_r: float = 0.0                 # التوقع خارج العينة **بعد** العمولة
     reasons: list[str] = field(default_factory=list)
 
     @property
@@ -160,6 +206,7 @@ def evaluate_candidate(
     split: float = 0.7,
     entry_delay: int = 1,
     min_windows: int = MIN_WINDOWS,
+    fee_pct: float = DEFAULT_FEE_PCT,
 ) -> Result:
     """يقيس مرشّحاً واحداً بكل الشروط، ويُرجع القرار مع أسبابه."""
     result = Result(name=name, strategy=strategy, params=params)
@@ -207,6 +254,18 @@ def evaluate_candidate(
             f"❌ {result.windows} نوافذ فقط (المطلوب {min_windows}) — الثبات "
             "يُقاس بالتكرار، ونافذتان أو ثلاث لا تقول شيئاً عن التكرار")
 
+    # ── العمولة: كم R تستهلك الصفقة الواحدة؟ ──
+    # R = بُعد الوقف. وقف واسع ⇒ العمولة جزء أصغر منه. فالاستراتيجيات
+    # ذات الأهداف الضيّقة (5m مثلًا) تدفع عمولةً **أكبر بوحدة R**، ولذلك
+    # يظهر ربحها الخامّ جيّداً ويتبخّر بعد العمولة.
+    result.fee_r = fee_drag_r(series, strategy, params, fee_pct=fee_pct)
+    result.net_r = result.test_r - result.fee_r
+    if result.net_r <= 0:
+        result.reasons.append(
+            f"❌ بعد العمولة {result.net_r:+.3f}R — العمولة تستهلك "
+            f"{result.fee_r:.3f}R من كل صفقة (ذهاباً وإياباً ≈ {fee_pct * 200:.2f}%"
+            f" ÷ بُعد الوقف)")
+
     # هامش ضئيل: ربح خارج العينة لا يغطّي تكلفة الصفقة نفسها.
     # (لا نرفضه تلقائياً لأن العمولة تختلف بين المنصّات، لكن نُبرزه)
     if result.test_r > 0 and result.test_r < 0.1:
@@ -233,6 +292,7 @@ def evaluate_candidate(
     result.accepted = (not blocking
                        and result.trades >= min_trades
                        and result.test_r > 0
+                       and result.net_r > 0
                        and result.windows >= min_windows
                        and result.consistency >= 0.6)
     if result.accepted:
@@ -257,13 +317,13 @@ def report(results: list[Result], *, min_trades: int, folds: int,
     print(line)
 
     results = sorted(results, key=lambda r: r.score, reverse=True)
-    print(f"\n  {'المرشّح':<16}{'صفقات':>7}{'داخل':>9}{'خارج':>9}"
-          f"{'الثبات':>9}   القرار")
+    print(f"\n  {'المرشّح':<15}{'صفقات':>7}{'داخل':>8}{'خارج':>8}{'صافي':>8}"
+          f"{'الثبات':>8}  القرار")
     for item in results:
-        print(f"  {item.name:<16}{item.trades:>7}{item.train_r:>+9.3f}"
-              f"{item.test_r:>+9.3f}"
-              f"{(f'{item.consistency * 100:.0f}%' if item.windows else '—'):>9}"
-              f"   {'✅' if item.accepted else '❌'}")
+        print(f"  {item.name:<15}{item.trades:>7}{item.train_r:>+8.3f}"
+              f"{item.test_r:>+8.3f}{item.net_r:>+8.3f}"
+              f"{(f'{item.consistency * 100:.0f}%' if item.windows else '—'):>8}"
+              f"  {'✅' if item.accepted else '❌'}")
 
     print("\n  ── التفصيل ──")
     for item in results:
@@ -271,16 +331,19 @@ def report(results: list[Result], *, min_trades: int, folds: int,
         if item.windows:
             print(f"     الثبات: {item.positive_windows}/{item.windows} "
                   f"نوافذ رابحة · متوسط {item.mean_window_r:+.3f}R")
+        if item.fee_r:
+            print(f"     العمولة: {item.fee_r:.3f}R لكل صفقة"
+                  f" ⇒ الصافي بعدها {item.net_r:+.3f}R")
         for reason in item.reasons:
             print(f"     {reason}")
 
     if baselines:
         print("\n  ── المرجع: استراتيجيتاك الحاليتان (نفس البيانات) ──")
         for item in baselines:
-            print(f"  {item.name:<16}{item.trades:>7}{item.train_r:>+9.3f}"
-                  f"{item.test_r:>+9.3f}"
-                  f"{(f'{item.consistency * 100:.0f}%' if item.windows else '—'):>9}"
-                  f"   {(f'{item.windows} نوافذ' if item.windows else '—')}")
+            print(f"  {item.name:<15}{item.trades:>7}{item.train_r:>+8.3f}"
+                  f"{item.test_r:>+8.3f}{item.net_r:>+8.3f}"
+                  f"{(f'{item.consistency * 100:.0f}%' if item.windows else '—'):>8}"
+                  f"  {(f'{item.windows} نوافذ' if item.windows else '—')}")
 
     winners = [r for r in results if r.accepted]
     print(f"\n{line}")
@@ -320,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"أدنى نوافذ لقياس الثبات (الافتراضي {MIN_WINDOWS})")
     parser.add_argument("--baseline", action="store_true",
                         help="أضف استراتيجيتَيك الحاليتَين مرجعاً للمقارنة")
+    parser.add_argument("--fee-pct", type=float, default=DEFAULT_FEE_PCT,
+                        help="العمولة لكل جهة (0.0005 = 0.05%% مثل عقود Binance)")
     parser.add_argument("--delay", type=int, default=1)
     parser.add_argument("--regime", default="mixed",
                         choices=("trend", "range", "mixed"))
@@ -376,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
                 name, strategy, params, series,
                 min_trades=args.min_trades, folds=args.folds,
                 split=args.split, entry_delay=args.delay,
-                min_windows=args.min_windows))
+                min_windows=args.min_windows, fee_pct=args.fee_pct))
             done += 1
             print(f"    … {done}/{total}", flush=True)
 
@@ -387,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
                 name, strategy, {}, series,
                 min_trades=args.min_trades, folds=args.folds,
                 split=args.split, entry_delay=args.delay,
-                min_windows=args.min_windows))
+                min_windows=args.min_windows, fee_pct=args.fee_pct))
 
     report(results, min_trades=args.min_trades, folds=args.folds,
            elapsed=time.time() - started, min_windows=args.min_windows,
