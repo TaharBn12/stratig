@@ -434,28 +434,55 @@ def test_flags_a_thin_margin_without_rejecting_it(monkeypatch):
     assert any("هامش ضئيل" in r for r in result.reasons)
 
 
-def test_rejects_a_candidate_that_dies_after_fees(monkeypatch):
-    """الربح الخامّ لا يكفي: إن أكلت العمولة الهامش كله ⇒ مرفوض.
+def test_fee_is_shown_but_not_subtracted_twice(monkeypatch):
+    """المُشغّل يخصم العمولة أصلاً ⇒ خصمها هنا again يكون **خصماً مزدوجاً**.
 
-    هذا بالضبط ما حدث على ONE/5m: ثلاثة مرشّحين بهامش خامّ
-    +0.03R…+0.09R، ووقف قصير ⇒ عمولة ≈ 0.07R ⇒ الصافي ≈ صفر أو سالب.
+    خطأ وقعنا فيه فعلاً: `scripts/backtest.run` يخصم FEE_PCT من كل صفقة،
+    ثم خصمناها مرة ثانية في المختبر — فظهرت استراتيجيات خاسرة وهي رابحة.
     """
     _patch(monkeypatch, [
         {"trades": 100, "expectancy_r": 0.40},
-        {"trades": 100, "expectancy_r": 0.018},        # خامّ: رابح
+        {"trades": 100, "expectancy_r": 0.018},
         {"trades": 20, "expectancy_r": 0.20},
         {"trades": 20, "expectancy_r": 0.25},
         {"trades": 20, "expectancy_r": 0.15},
         {"trades": 20, "expectancy_r": 0.10},
         {"trades": 20, "expectancy_r": 0.05},
     ])
-    result = labmod.evaluate_candidate("يأكله العمولة", "ema_momentum", {},
+    result = labmod.evaluate_candidate("عمولة", "ema_momentum", {},
                                        [synthetic_series(200, seed=1)],
                                        min_trades=80, folds=4)
-    assert result.fee_r > 0
-    assert result.net_r < result.test_r
-    assert result.accepted is False
-    assert any("بعد العمولة" in r for r in result.reasons)
+    assert result.fee_r > 0                       # تُحسب وتُعرض
+    assert result.net_r == result.test_r          # ولا تُخصم مرتين
+    assert not any("بعد العمولة" in r for r in result.reasons)
+
+
+def test_the_runner_already_deducts_fees_and_slippage():
+    """التوقع من المُشغّل صافٍ من العمولة، والانزلاق يزيد التكلفة."""
+    from scripts.backtest import run
+    from scripts.optimize import base_config
+
+    candles = synthetic_series(1200, seed=5, regime="mixed")
+    plain = run(candles, base_config("ema_momentum"), "ema_momentum", False, 1)
+    slipped = run(candles, base_config("ema_momentum"), "ema_momentum", False, 1,
+                  slippage_pct=0.002)
+    assert plain["trades"] and slipped["trades"]
+    assert slipped["expectancy_r"] < plain["expectancy_r"]
+    assert slipped["cost_r"] > plain["cost_r"]
+    assert len(plain["r_list"]) == plain["trades"]      # لكل صفقة عائدها
+
+
+def test_a_bounded_window_gives_the_same_result_faster():
+    """كل المؤشرات نافذية ⇒ تقييم آخر 400 شمعة يكفي (نتائج متطابقة)."""
+    from scripts.backtest import run
+    from scripts.optimize import base_config
+
+    candles = synthetic_series(1500, seed=7, regime="mixed")
+    for key in ("ema_momentum", "scalping_i"):
+        full = run(candles, base_config(key), key, False, 1)
+        quick = run(candles, base_config(key), key, False, 1, window=400)
+        assert full["trades"] == quick["trades"]
+        assert abs(full["expectancy_r"] - quick["expectancy_r"]) < 1e-9
 
 
 def test_a_huge_margin_is_not_flagged_as_thin(monkeypatch):

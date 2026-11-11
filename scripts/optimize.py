@@ -166,6 +166,8 @@ def evaluate(
     *,
     entry_delay: int = 1,
     use_closed: bool = False,
+    window: int | None = None,
+    slippage_pct: float = 0.0,
 ) -> dict:
     """يقيس تركيبة معاملات على مجموعة سلاسل — يُرجع النتيجة المجمّعة."""
     cfg = copy.deepcopy(base_cfg)
@@ -175,23 +177,31 @@ def evaluate(
     total_r = 0.0
     trades = 0
     win_rates = []
+    r_list: list[float] = []
+    entries: list[int] = []
     for candles in series:
-        result = run(candles, cfg, strategy_key, use_closed, entry_delay)
+        result = run(candles, cfg, strategy_key, use_closed, entry_delay,
+                     window=window, slippage_pct=slippage_pct)
         count = int(result.get("trades", 0) or 0)
         if not count:
             continue
         trades += count
         total_r += float(result.get("total_r", 0.0) or 0.0)
         win_rates.append(float(result.get("win_rate", 0.0) or 0.0))
+        r_list.extend(float(value) for value in result.get("r_list", []) or [])
+        entries.extend(int(value) for value in result.get("entries", []) or [])
 
     if not trades:
-        return {"trades": 0, "expectancy_r": 0.0, "win_rate": 0.0, "total_r": 0.0}
+        return {"trades": 0, "expectancy_r": 0.0, "win_rate": 0.0,
+                "total_r": 0.0, "r_list": [], "entries": []}
     return {
         "trades": trades,
         # التوقع = مجموع R ÷ عدد الصفقات (يجمع كل السلاسل بعدد صفقاتها)
         "expectancy_r": total_r / trades,
         "win_rate": statistics.fmean(win_rates) if win_rates else 0.0,
         "total_r": total_r,
+        "r_list": r_list,
+        "entries": entries,
     }
 
 

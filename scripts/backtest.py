@@ -135,16 +135,32 @@ def forward_return(candles: Candles, side: str, entry_price: float,
 
 
 def run(candles: Candles, cfg: Config, strategy_key: str, use_closed: bool = False,
-        entry_delay: int = 1, inverted: bool = False, horizon: int = 60) -> dict:
-    """يمشي على الشموع ويجمع إشارات الاستراتيجية — بلا أي نظرة للمستقبل."""
+        entry_delay: int = 1, inverted: bool = False, horizon: int = 60,
+        *, window: int | None = None, slippage_pct: float = 0.0) -> dict:
+    """يمشي على الشموع ويجمع إشارات الاستراتيجية — بلا أي نظرة للمستقبل.
+
+    ⚠️ مهم: العائد المُرجَع (`expectancy_r`) **صافٍ من العمولة أصلاً**
+    (`FEE_PCT` لكل جهة تُخصم من كل صفقة). فلا تخصمها مرة ثانية.
+
+    window:  إن تُرك None (الافتراضي) تُقيَّم كل شمعة على **كامل** ما قبلها
+             (الأدقّ، لكن O(n²) فبطيء على آلاف الشموع). وإن أُعطي رقماً
+             تُقيَّم على آخر `window` شمعة فقط — أسرع كثيراً (O(n×window))
+             والفرق لا يُذكر لأن كل المؤشرات here نافذية (أطولها 55 شمعة).
+    slippage_pct: فارق السعر المتوقّع عند التنفيذ لكل جهة (0.0002 = 0.02%).
+             يُضاف إلى العمولة — فالعملات منخفضة السيولة تُكلّف أكثر.
+    """
     strategy = get_strategy(strategy_key)
-    fwd3, trades, sides = [], [], []
+    fwd3, trades, sides, entries = [], [], [], []
     min_bars = strategy.min_candles + 5
+    cost_pct = FEE_PCT + slippage_pct
 
     for i in range(min_bars, len(candles) - entry_delay - 1):
-        window = candles.slice(0, i + 1)
+        lookback = window if window and window < len(candles) else 0
+        window_slice = (candles.slice(max(0, i + 1 - lookback), i + 1)
+                        if lookback else candles.slice(0, i + 1))
         decision = registry_evaluate(      # يمرّ عبر السجل (ومعه فلتر الاتجاه)
-            strategy.key, window, cfg, symbol="BT", use_closed_candles=use_closed
+            strategy.key, window_slice, cfg, symbol="BT",
+            use_closed_candles=use_closed
         )
         if not decision.has_signal:
             continue
@@ -157,10 +173,10 @@ def run(candles: Candles, cfg: Config, strategy_key: str, use_closed: bool = Fal
         sl_pct, tp_pct = exits_for(decision, cfg, side, entry)
         if sl_pct <= 0:
             continue
+        entries.append(i)          # فهرس شمعة الإشارة — يفيد فحص «النظرة للمستقبل»
         outcome, r = simulate(candles, side, entry, sl_pct, tp_pct,
                               i + max(entry_delay, 1), horizon)
-        sl_pct_net = sl_pct + 2 * FEE_PCT / 1.0        # تكلفة تقريبية من مسافة الوقف
-        trades.append(r - (2 * FEE_PCT) / sl_pct)
+        trades.append(r - (2 * cost_pct) / sl_pct)
         fwd3.append(forward_return(candles, side, entry, i + entry_delay, 3))
         sides.append(side)
 
@@ -174,6 +190,11 @@ def run(candles: Candles, cfg: Config, strategy_key: str, use_closed: bool = Fal
         "win_rate": 100.0 * len(wins) / len(trades),
         "expectancy_r": statistics.fmean(trades),
         "total_r": sum(trades),
+        # قائمة عوائد الصفقات بوحدة R — يحتاجها المُحكِّم (بوتستراب،
+        # أقصى سحب، عامل ربح). مرتّبة زمنياً كما وقعت.
+        "r_list": list(trades),
+        # شمعة الإشارة لكل صفقة (بنفس الترتيب) — لفحص النظرة للمستقبل
+        "entries": list(entries),
         "fwd3": mean_fwd,
         "fwd3_buy": statistics.fmean([f for f, s in zip(fwd3, sides) if s == "buy"])
         if any(s == "buy" for s in sides) else 0.0,
@@ -183,6 +204,7 @@ def run(candles: Candles, cfg: Config, strategy_key: str, use_closed: bool = Fal
         "sell": sides.count("sell"),
         "rr": (tp_pct / sl_pct) if sl_pct else 0.0,
         "fee_r": (2 * FEE_PCT) / sl_pct,
+        "cost_r": (2 * cost_pct) / sl_pct,
     }
 
 

@@ -56,8 +56,8 @@ def test_evaluate_aggregates_over_series():
 
 def test_evaluate_returns_zero_when_no_trades():
     result = opt.evaluate([], _cfg(), "scalping_i", {})
-    assert result == {"trades": 0, "expectancy_r": 0.0,
-                      "win_rate": 0.0, "total_r": 0.0}
+    assert result == {"trades": 0, "expectancy_r": 0.0, "win_rate": 0.0,
+                      "total_r": 0.0, "r_list": [], "entries": []}
 
 
 def test_evaluate_applies_the_parameters():

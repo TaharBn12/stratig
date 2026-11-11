@@ -54,7 +54,7 @@ DEFAULT_FEE_PCT = 0.0005
 
 def fee_drag_r(series: list[Candles], strategy: str, params: dict,
                *, fee_pct: float = DEFAULT_FEE_PCT) -> float:
-    """كم R تستهلك العمولة في الصفقة الواحدة؟
+    """كم R تستهلك العمولة في الصفقة الواحدة؟ (معلومة للعرض، لا للخصم)
 
     R = بُعد الوقف = sl_coef × ATR. فالعمولة بوحدة R هي:
 
@@ -254,17 +254,12 @@ def evaluate_candidate(
             f"❌ {result.windows} نوافذ فقط (المطلوب {min_windows}) — الثبات "
             "يُقاس بالتكرار، ونافذتان أو ثلاث لا تقول شيئاً عن التكرار")
 
-    # ── العمولة: كم R تستهلك الصفقة الواحدة؟ ──
-    # R = بُعد الوقف. وقف واسع ⇒ العمولة جزء أصغر منه. فالاستراتيجيات
-    # ذات الأهداف الضيّقة (5m مثلًا) تدفع عمولةً **أكبر بوحدة R**، ولذلك
-    # يظهر ربحها الخامّ جيّداً ويتبخّر بعد العمولة.
+    # ── كم استهلكت العمولة؟ (معلومة للعرض لا للخصم) ──
+    # ⚠️ المُشغّل `scripts/backtest.run` **يخصم العمولة أصلاً** من كل صفقة
+    # (FEE_PCT لكل جهة)، فالتوقع أعلاه **صافٍ منها**. نحسب هنا حجم الأثر
+    # لنفهمه — لا لنخصمه مرّة ثانية (خصم مزدوج = نتيجة قاسية كاذبة).
     result.fee_r = fee_drag_r(series, strategy, params, fee_pct=fee_pct)
-    result.net_r = result.test_r - result.fee_r
-    if result.net_r <= 0:
-        result.reasons.append(
-            f"❌ بعد العمولة {result.net_r:+.3f}R — العمولة تستهلك "
-            f"{result.fee_r:.3f}R من كل صفقة (ذهاباً وإياباً ≈ {fee_pct * 200:.2f}%"
-            f" ÷ بُعد الوقف)")
+    result.net_r = result.test_r
 
     # هامش ضئيل: ربح خارج العينة لا يغطّي تكلفة الصفقة نفسها.
     # (لا نرفضه تلقائياً لأن العمولة تختلف بين المنصّات، لكن نُبرزه)
@@ -333,7 +328,7 @@ def report(results: list[Result], *, min_trades: int, folds: int,
                   f"نوافذ رابحة · متوسط {item.mean_window_r:+.3f}R")
         if item.fee_r:
             print(f"     العمولة: {item.fee_r:.3f}R لكل صفقة"
-                  f" ⇒ الصافي بعدها {item.net_r:+.3f}R")
+                  f" (التوقع أعلاه صافٍ منها أصلاً)")
         for reason in item.reasons:
             print(f"     {reason}")
 

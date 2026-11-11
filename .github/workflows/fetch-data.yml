@@ -31,6 +31,9 @@ permissions:
 
 jobs:
   fetch:
+    # لا نودع بيانات على الفرع الافتراضي أبداً — هذا يمنع تلويث main
+    # (حدث مرّة: دمج PR أعاد تشغيل الـ workflow فرفع ملفات CSV على main)
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
