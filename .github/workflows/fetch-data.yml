@@ -4,7 +4,13 @@ name: fetch-data
 # السبب: بيئة التطوير هنا **بلا إنترنت خارجي**، فلا يمكن تنزيل البيانات
 # مباشرة. المستخدم العادي لا يحتاجها — عنده `scripts/fetch_candles.py`
 # يعمل على جهازه مباشرة.
+#
+# التشغيل: بحدث push على ملف داخل data/requests/ (لأن صلاحية
+# workflow_dispatch غير متاحة للتكامل هنا)، أو يدوياً من واجهة GitHub.
 on:
+  push:
+    paths:
+      - 'data/requests/*.txt'
   workflow_dispatch:
     inputs:
       symbol:
@@ -33,22 +39,47 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: قراءة الطلب
+        id: req
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "symbol=${{ inputs.symbol }}" >> "$GITHUB_OUTPUT"
+            echo "tf=${{ inputs.tf }}" >> "$GITHUB_OUTPUT"
+            echo "days=${{ inputs.days }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILE=$(ls data/requests/*.txt 2>/dev/null | head -1)
+          if [ -z "$FILE" ]; then
+            echo "لا يوجد ملف طلب"; exit 1
+          fi
+          echo "الطلب: $FILE"
+          cat "$FILE"
+          # السطر الأول: SYMBOL=ONEUSDT TF=15m DAYS=4
+          LINE=$(grep -m1 -v '^\s*#' "$FILE" | grep -v '^\s*$' || true)
+          echo "symbol=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/SYMBOL/{print $2}')" >> "$GITHUB_OUTPUT"
+          echo "tf=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/^TF/{print $2}')" >> "$GITHUB_OUTPUT"
+          echo "days=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/DAYS/{print $2}')" >> "$GITHUB_OUTPUT"
+
       - name: جلب الشموع
         run: |
+          set -euo pipefail
           mkdir -p data
           python scripts/fetch_candles.py \
-            --symbol "${{ inputs.symbol }}" \
-            --tf "${{ inputs.tf }}" \
-            --days "${{ inputs.days }}" \
-            --out "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+            --symbol "${{ steps.req.outputs.symbol }}" \
+            --tf "${{ steps.req.outputs.tf }}" \
+            --days "${{ steps.req.outputs.days }}" \
+            --out "data/${{ steps.req.outputs.symbol }}-${{ steps.req.outputs.tf }}.csv"
 
       - name: فحص سريع
         run: |
-          wc -l "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
-          head -3 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
-          tail -2 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+          set -euo pipefail
+          F="data/${{ steps.req.outputs.symbol }}-${{ steps.req.outputs.tf }}.csv"
+          wc -l "$F"
+          head -3 "$F"
+          tail -2 "$F"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: candles-${{ inputs.symbol }}-${{ inputs.tf }}
+          name: candles-${{ steps.req.outputs.symbol }}-${{ steps.req.outputs.tf }}
           path: data/*.csv
