@@ -449,6 +449,29 @@ w32tm /resync          &&:: موجّه أوامر «كنمسؤول»
 .venv\Scripts\python.exe scripts\lab.py --csv BTCUSDT-1h.csv --csv ETHUSDT-1h.csv --min-trades 80
 ```
 
+### من أين يأتي الـ CSV؟ (إن كان Binance محجوباً عندك)
+
+Binance وBybit **يحجبان** بعض البلدان جغرافياً (رسالة `Service unavailable from
+a restricted location`)، فلا يكفيك مفتاح. لذلك أضفنا جالباً يستخدم **واجهة OKX
+العامة** — بيانات السوق فيها لا تحتاج مفتاحاً ولا حساباً:
+
+```bat
+.venv\Scripts\python.exe scripts\fetch_candles.py --symbol ONEUSDT --tf 15m --days 4
+```
+
+فيكتب `data/ONEUSDT-15m.csv` ويقول لك سطر التشغيل التالي جاهزاً.
+
+| الخيار | المعنى |
+|---|---|
+| `--symbol ONEUSDT` | أي عملة تنتهي بـ USDT/USDC |
+| `--tf 15m` | `1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w` |
+| `--days 4` | كم يوماً للخلف من الآن |
+| `--market spot` | فوري بدل العقود المؤجّلة (الافتراضي `swap`) |
+
+> ⚠️ المصدر OKX لا Binance. الأسعار متقاربة بين المنصّات لكنها **ليست
+> متطابقة**، وفروق السيولة قد تغيّر نتيجة استراتيجية سكالبينغ. للقرارات
+> الحقيقية استخدم CSV من منصّتك أنت (الصيغة نفسها مقبولة).
+
 خيارات مفيدة:
 ```bat
 --min-trades 150        ← ارفع السقف إن أردت عيّنة أصلب
