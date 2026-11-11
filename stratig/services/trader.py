@@ -5,13 +5,23 @@ import asyncio
 import logging
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from ..config import Config
+from ..config import PROJECT_ROOT, Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
 from ..strategy.engine import Decision
+from ..risk import (
+    CircuitBreaker,
+    Journal,
+    RateLimiter,
+    Trade,
+    plan_protection,
+    position_size,
+    risk_of,
+)
 from ..strategy.registry import (
     check_config as check_strategy_config,
     evaluate as strategy_evaluate,
@@ -86,6 +96,19 @@ class Trader:
         self.strategy_warnings: list[str] = []
         self._strategy_warned = False
 
+        # ═══════════════ إدارة المخاطر ═══════════════
+        self.rate = RateLimiter()
+        self.breaker = CircuitBreaker()
+        journal_path = Path(str(config.get("risk.journal_path", "state/trades.json") or ""))
+        if not journal_path.is_absolute():
+            journal_path = PROJECT_ROOT / journal_path
+        self.journal = Journal(journal_path, limit=int(config.get("risk.journal_limit", 1000)))
+        self._risk_reason = ""            # آخر سبب منعه التداول
+        self._last_qty: dict[str, tuple[float, float]] = {}
+        self._opened_meta: dict[str, dict] = {}   # بيانات الصفقة لإدارة المخاطر لاحقاً
+        self._managed_sl: dict[str, float] = {}   # آخر وقف ضبطناه لكل رمز
+        self._sync_risk()
+
     # ═══════════════════ إعداد ═══════════════════
     def attach_notifier(self, notifier: Notifier) -> None:
         self.notifier = notifier
@@ -107,6 +130,48 @@ class Trader:
             )
             log.error("%s — تم استخدام %s بدلاً منها", error, strategy.key)
         return strategy
+
+    def _sync_risk(self) -> None:
+        """يقرأ إعدادات المخاطر (تُستدعى عند الإقلاع وبعد كل /set)."""
+        g = self.cfg.get
+        self.rate.max_per_hour = int(g("risk.max_trades_per_hour", 0) or 0)
+        self.rate.min_gap_seconds = float(g("risk.min_gap_seconds", 0) or 0)
+        self.breaker.max_losses = int(g("risk.max_consecutive_losses", 0) or 0)
+        self.breaker.pause_seconds = float(g("risk.pause_after_losses_seconds", 3600) or 0)
+
+    def risk_gate(self, now: float | None = None) -> tuple[bool, str]:
+        """بوابة قبل أي فتح: معدّل + قاطع الخسائر. (False, السبب) إن مُنع."""
+        self._sync_risk()
+        ok, reason = self.breaker.check(now)
+        if not ok:
+            self._risk_reason = reason
+            return False, reason
+        ok, reason = self.rate.check(now)
+        if not ok:
+            self._risk_reason = reason
+            return False, reason
+        self._risk_reason = ""
+        return True, ""
+
+    def sized_qty(self, sl_pct: float, default_qty: float) -> float:
+        """حجم الصفقة: ثابت، أو محسوب بحيث تكون الخسارة = risk_pct × الرصيد."""
+        mode = str(self.cfg.get("risk.sizing", "fixed") or "fixed").lower()
+        if mode != "risk" or sl_pct <= 0:
+            return float(default_qty)
+        try:
+            balance = float(self.exchange.balance().available)
+        except Exception as err:  # pragma: no cover
+            log.debug("تعذّر جلب الرصيد للحجم الديناميكي: %s", err)
+            return float(default_qty)
+        qty = position_size(
+            balance,
+            float(self.cfg.get("risk.risk_per_trade_pct", 0.01) or 0.01),
+            sl_pct,
+            leverage=int(self.cfg.get("trade.leverage", 10)),
+            max_qty=float(self.cfg.get("risk.max_qty_usdt", 0) or 0) or None,
+            min_qty=float(self.cfg.get("risk.min_qty_usdt", 0) or 0),
+        )
+        return qty or float(default_qty)
 
     def validate_strategy_config(self) -> list[str]:
         """يتحقق من اتساق إعدادات الاستراتيجية ويُصلحها (يُستدعى عند الإقلاع)."""
@@ -570,6 +635,12 @@ class Trader:
             log.warning("[%s] دخول متأخّر: %s", sig.symbol, stale)
             await self.notifier.send(f"⚠️ {stale}\n<i>سأفتحها كما طلبت.</i>")
 
+        allowed, why = self.risk_gate()
+        if not allowed:
+            await self.notifier.send(f"🛡 {why}")
+            log.info("[%s] موقوف بإدارة المخاطر: %s", sig.symbol, why)
+            return None
+
         tp_pct, sl_pct, exit_error = self._resolve_exits(sig)
         if exit_error:
             sig.status = STATUS_FAILED
@@ -579,12 +650,14 @@ class Trader:
                 "للتجاوز: <code>/set strict false</code>"
             )
             return None
+        qty_usdt = self.sized_qty(sl_pct, float(self.cfg.get("trade.qty_usdt", 50)))
+        self._last_qty[sig.symbol] = (qty_usdt, sl_pct)
         try:
             result = await asyncio.to_thread(
                 self.exchange.open_market,
                 sig.symbol,
                 sig.side,
-                float(self.cfg.get("trade.qty_usdt", 50)),
+                qty_usdt,
                 tp_pct,
                 sl_pct,
                 int(self.cfg.get("trade.leverage", 10)),
@@ -608,6 +681,16 @@ class Trader:
         sig.result = result
         self.trades_today += 1
         self.stats["opened"] += 1
+        self.rate.record()
+        self._opened_meta[sig.symbol] = {
+            "side": sig.side,
+            "entry": result.price if result else sig.price,
+            "sl_dist": sig.decision.sl_distance if sig.decision else None,
+            "sl_pct": sl_pct,
+            "strategy": self.strategy_key,
+            "opened_at": time.time(),
+            "tp_price": (result.tp_price if result else None),
+        }
         if notify_result:
             await self.notifier.edit(sig.ref, self._opened_text(sig), self._manage_buttons(sig.symbol))
         return result
@@ -664,6 +747,7 @@ class Trader:
             return None
         self.stats["closed"] += 1
         pnl = await asyncio.to_thread(self.exchange.recent_pnl, 1)
+        self._record_close(symbol, float(pnl or 0.0), result)
         await self.notifier.send(
             f"🔒 <b>تم إغلاق الصفقة</b>\n"
             f"الرمز: <code>{_esc(symbol)}</code>\n"
@@ -671,6 +755,107 @@ class Trader:
             f"آخر ربح محقق: <b>{pnl:+.4f} USDT</b>"
         )
         return result
+
+    # ═══════════════ إدارة الصفقات المفتوحة ═══════════════
+    async def manage_positions(self) -> int:
+        """يفحص الصفقات المفتوحة ويُحسّن وقفها: تعادل / متحرك / إغلاق لانتهاء المدة.
+
+        مُعطّل افتراضياً (`risk.manage_positions`) لأنه يلغي الأوامر الشرطية
+        ويعيد وضعها — ميزة متقدّمة لمن يفهم أثرها.
+        """
+        if not bool(self.cfg.get("risk.manage_positions", False)):
+            return 0
+        try:
+            positions = await asyncio.to_thread(self.exchange.positions)
+        except Exception as err:  # pragma: no cover
+            log.debug("تعذّر جلب الصفقات للإدارة: %s", err)
+            return 0
+
+        changed = 0
+        for pos in positions:
+            symbol = pos.symbol.upper()
+            meta = self._opened_meta.get(symbol)
+            if not meta or not pos.entry_price or not pos.mark_price:
+                continue                      # صفقة لم يفتحها البوت → لا نتدخّل
+            entry = float(meta.get("entry") or pos.entry_price)
+            sl_pct = float(meta.get("sl_pct") or 0)
+            if sl_pct <= 0:
+                continue
+            sl_distance = float(meta.get("sl_dist") or 0) or entry * sl_pct
+            current_sl = float(self._managed_sl.get(symbol) or 0)
+            trail_distance = None
+            if bool(self.cfg.get("risk.trailing", False)):
+                trail_distance = sl_distance * float(
+                    self.cfg.get("risk.trail_distance_mult", 1.0) or 1.0
+                )
+
+            plan = plan_protection(
+                side=pos.side,
+                entry=entry,
+                current=pos.mark_price,
+                sl_distance=sl_distance,
+                current_sl=current_sl or (entry - sl_distance if pos.side == BUY
+                                          else entry + sl_distance),
+                opened_at=float(meta.get("opened_at") or 0),
+                breakeven_after_r=float(self.cfg.get("risk.breakeven_after_r", 1.0) or 0),
+                breakeven_offset_pct=float(self.cfg.get("risk.breakeven_offset_pct", 0) or 0),
+                trailing=bool(self.cfg.get("risk.trailing", False)),
+                trail_distance=trail_distance,
+                max_hold_seconds=float(self.cfg.get("risk.max_hold_seconds", 0) or 0),
+            )
+            if plan.action == "close":
+                await self.close_symbol(symbol)
+                self._managed_sl.pop(symbol, None)
+                changed += 1
+            elif plan.action in ("breakeven", "trail") and plan.new_sl:
+                await self._apply_stop(symbol, pos.side, plan.new_sl, meta, plan.reason)
+                changed += 1
+        return changed
+
+    async def _apply_stop(self, symbol: str, side: str, new_sl: float,
+                          meta: dict, reason: str) -> None:
+        try:
+            ok = await asyncio.to_thread(
+                self.exchange.replace_protection, symbol, side, new_sl,
+                meta.get("tp_price"),
+            )
+        except Exception as err:  # pragma: no cover
+            log.warning("[%s] تعذّر تحديث الوقف: %s", symbol, err)
+            return
+        if not ok:
+            return
+        self._managed_sl[symbol] = new_sl
+        log.info("[%s] %s → وقف جديد %s", symbol, reason, f"{new_sl:.6g}")
+        await self.notifier.send(
+            f"🛡 <b>{_esc(reason)}</b>\n"
+            f"الرمز: <code>{_esc(symbol)}</code>\n"
+            f"الوقف الجديد: <code>{_num(new_sl)}</code>"
+        )
+
+    def _record_close(self, symbol: str, pnl: float, result=None) -> None:
+        """يسجّل الصفقة في السجل (لإحصائيات /stats) ويُغذّي قاطع الخسائر."""
+        meta = self._opened_meta.pop(symbol.upper(), {}) or {}
+        sl_dist = meta.get("sl_dist")
+        entry = float(meta.get("entry") or (result.price if result else 0.0) or 0.0)
+        r_multiple = (pnl / (sl_dist * (result.qty or 1))) if (sl_dist and result and
+                                                               result.qty) else 0.0
+        if not r_multiple and meta.get("sl_pct") and entry:
+            # تقدير بوحدة R من نسبة الوقف (إن لم تُعرف مسافة ATR)
+            qty_value = (result.qty or 0) * entry if result else 0.0
+            r_multiple = pnl / (qty_value * float(meta["sl_pct"])) if qty_value else 0.0
+        self.journal.add(
+            Trade(
+                symbol=symbol.upper(),
+                side=str(meta.get("side") or (result.side if result else "")),
+                pnl=float(pnl),
+                r_multiple=float(r_multiple),
+                opened_at=float(meta.get("opened_at") or time.time()),
+                closed_at=time.time(),
+                strategy=str(meta.get("strategy") or self.strategy_key),
+            )
+        )
+        self.breaker.record(float(pnl))
+        self.pnl_today += float(pnl)
 
     async def close_all(self) -> int:
         positions = await asyncio.to_thread(self.exchange.positions)

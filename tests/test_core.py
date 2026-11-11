@@ -659,3 +659,90 @@ def test_fresh_entry_is_not_blocked(tmp_path):
     sig = list(trader.pending.values())[0]
     assert trader._stale_entry_error(sig) == ""   # سعر المنصة = سعر الإشارة
     assert asyncio.run(trader.open_signal(sig.id)) is not None
+
+
+# ═══════════════════════ بوابة المخاطر في المتداول ═══════════════════════
+def test_rate_limit_blocks_opening(tmp_path):
+    """الوضع التلقائي مع إشارات كثيرة: الحدّ يمنع النزيف."""
+    trader, ex = make_trader(tmp_path, risk__max_trades_per_hour=1)
+    asyncio.run(trader.scan_once())
+    first = list(trader.pending.values())[0]
+    assert asyncio.run(trader.open_signal(first.id)) is not None
+
+    trader.pending.clear()
+    ex.set_positions([])                       # لا صفقة مفتوحة → إشارة جديدة
+    trader.cooldown.clear()
+    found = asyncio.run(trader.scan_once())
+    if found:                                  # إن وُجدت إشارة ثانية تُمنع
+        assert asyncio.run(trader.open_signal(found[0].id)) is None
+
+
+def test_min_gap_blocks_back_to_back_trades(tmp_path):
+    trader, ex = make_trader(tmp_path, risk__min_gap_seconds=3600)
+    asyncio.run(trader.scan_once())
+    sig = list(trader.pending.values())[0]
+    assert asyncio.run(trader.open_signal(sig.id)) is not None
+    ok, reason = trader.risk_gate()
+    assert ok is False and "فاصل إلزامي" in reason
+
+
+def test_circuit_breaker_stops_the_bot(tmp_path):
+    trader, ex = make_trader(tmp_path, risk__max_consecutive_losses=2)
+    trader.breaker.record(-10)
+    trader.breaker.record(-10)
+    ok, reason = trader.risk_gate()
+    assert ok is False and "موقوف" in reason
+
+
+def test_dynamic_sizing_uses_balance_and_stop(tmp_path):
+    """sizing=risk ⇒ الخسارة عند الوقف = نسبة ثابتة من الرصيد."""
+    trader, ex = make_trader(tmp_path, risk__sizing="risk",
+                             risk__risk_per_trade_pct=0.01,
+                             risk__journal_path=str(tmp_path / "t.json"))
+    balance = float(ex.balance().available)
+    qty = trader.sized_qty(0.01, default_qty=50.0)     # وقف 1%
+    assert qty == pytest.approx(balance * 0.01 / 0.01, rel=1e-6)
+    assert qty != 50.0                                 # ليس الحجم الثابت
+
+
+def test_fixed_sizing_unchanged(tmp_path):
+    trader, ex = make_trader(tmp_path)
+    assert trader.sized_qty(0.01, default_qty=50.0) == 50.0
+
+
+def test_journal_records_closed_trade(tmp_path):
+    trader, ex = make_trader(tmp_path, risk__journal_path=str(tmp_path / "j.json"))
+    trader._opened_meta["AAAUSDT"] = {
+        "side": "buy", "entry": 100.0, "sl_pct": 0.01, "sl_dist": 1.0,
+        "strategy": "rsi_williams", "opened_at": time.time() - 60,
+    }
+    trader._record_close("AAAUSDT", 12.5, None)
+    assert trader.journal.count == 1
+    assert trader.journal.total_pnl == pytest.approx(12.5)
+
+
+def test_manage_positions_off_by_default(tmp_path):
+    trader, ex = make_trader(tmp_path, risk__journal_path=str(tmp_path / "m.json"))
+    assert asyncio.run(trader.manage_positions()) == 0
+
+
+def test_manage_positions_moves_stop_to_breakeven(tmp_path):
+    """الوقف ينتقل للتعادل بعد 1R — فيُغلَق بلا خسارة بدل −1R."""
+    trader, ex = make_trader(
+        tmp_path,
+        risk__journal_path=str(tmp_path / "b.json"),
+        risk__manage_positions=True,
+        risk__breakeven_after_r=1.0,
+    )
+    from stratig.exchanges.base import Position
+
+    entry = 100.0
+    trader._opened_meta["AAAUSDT"] = {
+        "side": "buy", "entry": entry, "sl_pct": 0.01, "sl_dist": 1.0,
+        "strategy": "rsi_williams", "opened_at": time.time() - 60,
+    }
+    ex.set_positions([Position(symbol="AAAUSDT", side="buy", size=1.0,
+                               entry_price=entry, mark_price=101.5)])
+    ex.replace_protection = lambda *a, **k: True
+    assert asyncio.run(trader.manage_positions()) == 1
+    assert trader._managed_sl["AAAUSDT"] == pytest.approx(entry, rel=1e-3)

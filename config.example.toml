@@ -78,6 +78,32 @@ min_notional = 20
 daily_max_trades = 0
 daily_max_loss_usdt = 0
 
+# حجم الصفقة: "fixed" = trade.qty_usdt · "risk" = خسارة ثابتة = نسبة من الرصيد
+sizing = "fixed"
+risk_per_trade_pct = 0.01
+max_qty_usdt = 0
+min_qty_usdt = 0
+
+# معدّل الدخول (يمنع الإفراط في التداول في الوضع التلقائي)
+max_trades_per_hour = 0
+min_gap_seconds = 0
+
+# قاطع الخسائر المتتالية
+max_consecutive_losses = 0
+pause_after_losses_seconds = 3600
+
+# إدارة الصفقة المفتوحة (اختياري — مُعطّل افتراضياً)
+manage_positions = false
+manage_interval_seconds = 60
+breakeven_after_r = 1.0
+breakeven_offset_pct = 0.0006
+trailing = false
+trail_distance_mult = 1.0
+max_hold_seconds = 0
+
+journal_path = "state/trades.json"
+journal_limit = 1000
+
 [scanner]
 autostart = true
 interval_seconds = 120

@@ -185,3 +185,41 @@ def help_text() -> str:
             "<i>لفحص كل العملات تلقائياً في كل دورة: /set topn 0</i>",
         ]
     )
+
+
+def stats_text(journal, rate, breaker) -> str:
+    """📉 إحصائيات حقيقية من سجل الصفقات — هي ما يقرّر إن كانت الاستراتيجية تعمل."""
+    if journal.count == 0:
+        return "\n".join(
+            [
+                "📉 <b>إحصائياتي</b>",
+                "",
+                "لا توجد صفقات مسجّلة بعد.",
+                "",
+                "<i>يُسجَّل البوت كل صفقة تُغلقها — تعالَ بعد أول صفقة.</i>",
+            ]
+        )
+    pf = journal.profit_factor
+    pf_text = "∞" if pf == float("inf") else f"{pf:.2f}"
+    today = journal.today()
+    lines = [
+        "📉 <b>إحصائياتي</b>",
+        "",
+        f"عدد الصفقات: <b>{journal.count}</b> (اليوم: {len(today)})",
+        f"نسبة النجاح: <b>{journal.win_rate:.1f}%</b>",
+        f"التوقع: <b>{journal.expectancy_r:+.3f}R</b> لكل صفقة",
+        f"معامل الربح: <b>{pf_text}</b>  (إجمالي ربح ÷ إجمالي خسارة)",
+        f"صافي الربح: <b>{journal.total_pnl:+.2f} USDT</b>",
+        f"أقصى سحب: {journal.max_drawdown:.2f} USDT",
+        "",
+        f"ربح اليوم: <b>{sum(t.pnl for t in today):+.2f} USDT</b>",
+    ]
+    if rate.max_per_hour:
+        lines.append(f"الصفقات المتبقية هذه الساعة: {rate.remaining()}")
+    if breaker.max_losses:
+        lines.append(f"خسائر متتالية حالياً: {breaker.losses}/{breaker.max_losses}")
+    lines += [
+        "",
+        "<i>التوقع الموجب مع معامل ربح &gt; 1 هو ما يثبت أن الاستراتيجية تعمل.</i>",
+    ]
+    return "\n".join(lines)
