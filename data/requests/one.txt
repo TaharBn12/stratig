@@ -1,3 +1,4 @@
-# بيانات اختبار ONE — آخر 4 أيام (OKX swap)
+# بيانات اختبار ONE
 SYMBOL=ONEUSDT TF=15m DAYS=4
 SYMBOL=ONEUSDT TF=5m DAYS=4
+SYMBOL=ONEUSDT TF=15m DAYS=30
