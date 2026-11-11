@@ -21,8 +21,23 @@ testnet = true
 name = "rsi_williams"
 timeframe = "15m"
 candles = 500
-use_closed_candles = false
+# true = الحساب على شمعة **مكتملة** (بدون إعادة رسم) — اتركه true دائماً.
+# false = يُحسب على الشمعة الحالية وهي لم تُغلق بعد → الإشارة تظهر ثم تنقلب
+use_closed_candles = true
 require_both = true
+
+# فلاتر جودة الإشارة (اختيارية، مُعطّلة افتراضياً)
+# "إشارات كثيرة لكن ضعيفة": تقلّل العدد وتبقي الأفضل
+quality_enabled = false
+regime = "off"            # off | trend | range  (حسب ADX)
+adx_length = 14
+adx_trend_min = 25.0
+adx_range_max = 20.0
+mtf_enabled = false       # تأكيد من إطار أعلى
+mtf_timeframe = "1h"
+mtf_ema_period = 50
+volatility_min_pct = 0.0
+volatility_max_pct = 0.0
 
 [strategy.scalping_i]
 ema_slow = 50

@@ -227,6 +227,71 @@ def atr(
     return moving(true_range(high, low, close), length)
 
 
+def adx(
+    high: Sequence[float],
+    low: Sequence[float],
+    close: Sequence[float],
+    length: int = 14,
+) -> tuple[list[float], list[float], list[float]]:
+    """مؤشر الاتجاه ADX مع ‎+DI‎ و‎−DI‎ — مثل ta.trend.ADXIndicator.
+
+    ADX يقيس **قوة** الاتجاه بلا جهة:
+        ADX > 25  → سوق متّجه (استراتيجيات الاختراق تعمل)
+        ADX < 20  → سوق جانبي (استراتيجيات الارتداد تعمل)
+
+    هذا هو المعيار الذي نستخدمه لاختيار النظام المناسب للاستراتيجية،
+    لأن قياسنا أثبت أن `rsi_williams` تكسب في الجانبي وتخسر في المتّجه.
+    """
+    length = max(1, int(length))
+    size = len(close)
+    tr = true_range(high, low, close)
+    plus_dm: list[float] = []
+    minus_dm: list[float] = []
+    for i in range(size):
+        if i == 0:
+            plus_dm.append(0.0)
+            minus_dm.append(0.0)
+            continue
+        up = float(high[i]) - float(high[i - 1])
+        down = float(low[i - 1]) - float(low[i])
+        plus_dm.append(up if (up > down and up > 0) else 0.0)
+        minus_dm.append(down if (down > up and down > 0) else 0.0)
+
+    atr_values = wilder_ma(tr, length)
+    plus_smooth = wilder_ma(plus_dm, length)
+    minus_smooth = wilder_ma(minus_dm, length)
+
+    plus_di = [NAN] * size
+    minus_di = [NAN] * size
+    dx_values: list[float] = []
+    for i in range(size):
+        a = atr_values[i]
+        p = plus_smooth[i]
+        m = minus_smooth[i]
+        if math.isnan(a) or math.isnan(p) or math.isnan(m) or a == 0:
+            dx_values.append(NAN)
+            continue
+        plus_di[i] = 100.0 * p / a
+        minus_di[i] = 100.0 * m / a
+        total = plus_di[i] + minus_di[i]
+        dx_values.append(NAN if total == 0 else 100.0 * abs(plus_di[i] - minus_di[i]) / total)
+
+    adx_values = wilder_ma(dx_values, length)
+    return adx_values, plus_di, minus_di
+
+
+def atr_pct(high, low, close, length: int = 14, price: float | None = None) -> float:
+    """التقلّب كنسبة من السعر (ATR ÷ السعر) — لفلتر التقلّب."""
+    values = atr(high, low, close, length, mode="wilder")
+    if not values:
+        return NAN
+    last = values[-1]
+    if math.isnan(last):
+        return NAN
+    reference = float(price) if price else float(close[-1])
+    return last / reference if reference else NAN
+
+
 # ═════════════════════════ الإشارات ═════════════════════════
 def rsi_signal(
     close: Sequence[float],

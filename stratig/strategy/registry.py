@@ -60,7 +60,38 @@ def evaluate(key: Optional[str], candles: Candles, cfg, symbol: str = "",
     )
     if decision.has_signal:
         _apply_trend_filter(decision, candles, cfg)
+        _apply_quality_filters(decision, candles, cfg)
     return decision
+
+
+def _apply_quality_filters(decision, candles: Candles, cfg) -> None:
+    """فلاتر الجودة التي تحتاج شموع الرمز نفسه: نظام السوق (ADX) + التقلّب.
+
+    (أما تأكيد الإطار الأعلى ففي `Trader` لأنه يحتاج جلب شموع إضافية.)
+    """
+    if not cfg or not bool(cfg.get("strategy.quality_enabled", False)):
+        return
+    from .filters import apply_filters
+    from .indicators import adx, atr_pct
+
+    if candles is None or len(candles) < 60:
+        return
+    length = int(cfg.get("strategy.adx_length", 14) or 14)
+    adx_values, _plus, _minus = adx(list(candles.high), list(candles.low),
+                                    list(candles.close), length)
+    adx_value = adx_values[-1] if adx_values else float("nan")
+    volatility = atr_pct(list(candles.high), list(candles.low), list(candles.close),
+                         length, price=candles.last_close)
+    apply_filters(
+        decision,
+        adx_value=adx_value,
+        regime=str(cfg.get("strategy.regime", "off") or "off"),
+        trend_min=float(cfg.get("strategy.adx_trend_min", 25.0) or 0),
+        range_max=float(cfg.get("strategy.adx_range_max", 20.0) or 0),
+        atr_percent=volatility,
+        vol_min=float(cfg.get("strategy.volatility_min_pct", 0.0) or 0),
+        vol_max=float(cfg.get("strategy.volatility_max_pct", 0.0) or 0),
+    )
 
 
 def _apply_trend_filter(decision, candles: Candles, cfg) -> None:

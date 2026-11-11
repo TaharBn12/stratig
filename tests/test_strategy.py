@@ -328,3 +328,53 @@ def test_trend_filter_never_inverts_a_signal():
     )
     if plain.has_signal and filtered.has_signal:
         assert plain.side == filtered.side
+
+
+# ═══════════════════════ فلاتر الجودة داخل السجل ═══════════════════════
+def test_quality_filters_disabled_by_default():
+    from stratig.strategy.registry import evaluate as reg_evaluate
+
+    candles = make_candles(sign=1)
+    decision = reg_evaluate("rsi_williams", candles, _cfg(), use_closed_candles=False)
+    assert not any("بلا اتجاه" in n or "هائج" in n or "ساكن" in n for n in decision.notes)
+
+
+def test_quality_filter_blocks_the_losing_regime():
+    """`rsi_williams` تخسر في السوق المتّجه — فلتر `range` يمنعها هناك."""
+    from stratig.strategy.registry import evaluate as reg_evaluate
+    from stratig.strategy.indicators import adx
+
+    candles = make_candles(sign=1)
+    values, _p, _m = adx(list(candles.high), list(candles.low), list(candles.close), 14)
+    adx_now = values[-1] if values else float("nan")
+    cfg = _cfg(**{"strategy": {"quality_enabled": True, "regime": "range",
+                               "adx_range_max": 20.0}})
+    decision = reg_evaluate("rsi_williams", candles, cfg, use_closed_candles=False)
+    if adx_now > 20.0:
+        assert decision.side is None
+        assert any("متّجه" in note for note in decision.notes)
+
+
+def test_quality_filters_never_invert_a_signal():
+    from stratig.strategy.registry import evaluate as reg_evaluate
+
+    candles = make_candles(sign=1)
+    plain = reg_evaluate("rsi_williams", candles, _cfg(), use_closed_candles=False)
+    filtered = reg_evaluate(
+        "rsi_williams", candles,
+        _cfg(**{"strategy": {"quality_enabled": True, "regime": "trend"}}),
+        use_closed_candles=False,
+    )
+    if plain.has_signal and filtered.has_signal:
+        assert plain.side == filtered.side
+
+
+def test_quality_notes_appear_on_accepted_signals():
+    from stratig.strategy.registry import evaluate as reg_evaluate
+
+    candles = make_candles(sign=1)
+    cfg = _cfg(**{"strategy": {"quality_enabled": True, "regime": "off",
+                               "volatility_min_pct": 0.0, "volatility_max_pct": 0.0}})
+    decision = reg_evaluate("rsi_williams", candles, cfg, use_closed_candles=False)
+    if decision.has_signal:
+        assert any("الجودة" in line for line in decision.lines)

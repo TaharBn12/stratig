@@ -264,12 +264,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="نظام السوق الاصطناعي: اتجاهي / جانبي / مختلط")
     parser.add_argument("--trend-filter", action="store_true",
                         help="فعّل فلتر الاتجاه (strategy.trend_filter=ema)")
+    parser.add_argument("--quality", action="store_true",
+                        help="فعّل فلاتر الجودة (ADX/تقلّب)")
+    parser.add_argument("--adx-regime", default="", choices=("", "trend", "range"),
+                        help="نظام السوق المسموح مع --quality")
     args = parser.parse_args(argv)
 
     cfg = Config.load()
     if args.trend_filter:
         cfg.set("strategy.trend_filter", "ema")
         print("  فلتر الاتجاه: مُفعّل (EMA 200)")
+    if args.quality:
+        cfg.set("strategy.quality_enabled", True)
+        if args.adx_regime:
+            cfg.set("strategy.regime", args.adx_regime)
+        print(f"  فلاتر الجودة: مُفعّلة (نظام: {args.adx_regime or 'الكل'})")
     keys = [args.strategy] if args.strategy else [s.key for s in all_strategies()]
 
     print(LINE)
