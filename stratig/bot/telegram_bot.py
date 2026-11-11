@@ -23,6 +23,7 @@ from telegram.ext import (
     filters,
 )
 
+from .. import presets
 from ..config import Config, Secrets
 from ..strategy.registry import (
     all_strategies,
@@ -63,6 +64,7 @@ TEXT_COMMANDS = {
     "🧪 محاكاة": "dryrun",
     "📉 إحصائياتي": "stats",
     "📊 مقياس الميزة": "edge",
+    "⭐ الإعدادات المُوصى بها": "recommended",
     "🌐 لوحة التحكم": "dashboard",
     "❔ مساعدة": "help",
 }
@@ -180,6 +182,8 @@ class TelegramBot:
         self.known: set[int] = set(secrets.chat_ids or [])
         self._scan_task = None          # حلقة فحص احتياطية عند غياب JobQueue
         self._scan_lock = None          # يُنشأ داخل حلقة الأحداث
+        self._pending_rec = None        # خطة /recommended قبل التأكيد
+        self._last_rec_undo = {}        # نسخة للتراجع بعد التطبيق
         self.app = (
             ApplicationBuilder()
             .token(secrets.telegram_token)
@@ -227,6 +231,7 @@ class TelegramBot:
             ("stats", self._stats),
             ("dashboard", self._dashboard),
             ("edge", self._edge),
+            ("recommended", self._recommended),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -874,6 +879,72 @@ class TelegramBot:
         await self._reply(update, fmt.edge_text(self.trader.edge_report()))
 
     @restricted
+    async def _recommended(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/recommended — الإعدادات المُوصى بها: يعرض الخطة أولاً، ثم يطبّق."""
+        args = [str(a).lower() for a in (context.args or [])]
+        if args and args[0] in ("undo", "تراجع", "رجوع"):
+            return await self._recommended_undo(update)
+
+        changes = presets.diff(self.cfg, str(self.trader.strategy_key))
+        pending = [c for c in changes if c.changed]
+        if not pending:
+            await self._reply(update,
+                              "✅ كل الإعدادات المُوصى بها مطبَّقة مسبقاً.")
+            return
+
+        self._pending_rec = {c.rec.path: c.old for c in pending}
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"✅ طبّق ({len(pending)} تغيير)",
+                                 callback_data="rec:yes"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="rec:no"),
+        ]])
+        text = (
+            f"⭐ <b>الإعدادات المُوصى بها</b> — {len(pending)} تغيير مقترح\n\n"
+            f"{presets.format_changes(pending)}\n"
+            "هذه التوصيات مبنيّة على قياساتنا، وكلها <b>قابلة للتراجع</b>.\n"
+            "<b>لا تُغيّر معاملات الاستراتيجية نفسها أبداً</b> — تحميك حولها فقط."
+        )
+        await self._reply(update, text, keyboard)
+
+    @restricted
+    async def _recommended_apply(self, query) -> None:
+        """ينفّذ التطبيق بعد التأكيد — ويحفظ نسخة للتراجع."""
+        undo = getattr(self, "_pending_rec", None)
+        if not undo:
+            await query.edit_message_text(
+                "انتهت صلاحية الطلب — أرسل /recommended من جديد.")
+            return
+
+        changes, snapshot = presets.apply(self.cfg, str(self.trader.strategy_key))
+        applied = [c for c in changes if c.changed]
+        self._last_rec_undo = snapshot or undo
+        self._pending_rec = None
+        self.cfg.save()
+
+        text = ("✅ <b>طُبِّقت " + str(len(applied)) + " توصية</b>\n\n"
+                + presets.format_changes(applied)
+                + "\nللتراجع: <code>/recommended undo</code>")
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML)
+        except Exception:
+            await query.edit_message_text("✅ طُبِّقت " + str(len(applied)) + " توصية.")
+
+    @restricted
+    async def _recommended_undo(self, update) -> None:
+        """/recommended undo — يُعيد ما كان قبل التطبيق."""
+        undo = getattr(self, "_last_rec_undo", None)
+        if not undo:
+            await self._reply(update, "لا يوجد شيء للتراجع عنه.")
+            return
+        restored = presets.restore(self.cfg, undo)
+        self._last_rec_undo = {}
+        self.cfg.save()
+        await self._reply(
+            update,
+            "↩️ أُعيدت " + str(len(restored)) + " قيمة إلى ما كانت عليه:\n"
+            + "\n".join("  • " + str(path) for path in restored))
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -1105,6 +1176,7 @@ class TelegramBot:
             "stats": self._stats,
             "dashboard": self._dashboard,
             "edge": self._edge,
+            "recommended": self._recommended,
             "scan": self._scan,
             "scanall": self._scan_all,
             "settings": self._settings,
@@ -1134,6 +1206,15 @@ class TelegramBot:
                 await query.answer("❌ استراتيجية غير معروفة", show_alert=True)
                 return
             await self._show_switched(query, self._switch_strategy(data[1]))
+            return
+
+        # ── الإعدادات المُوصى بها ──
+        if kind == "rec" and len(data) == 2:
+            if data[1] == "yes":
+                await self._recommended_apply.__wrapped__(self, query)
+            else:
+                self._pending_rec = None
+                await query.edit_message_text("❌ لم يُغيَّر شيء.")
             return
 
         # ── إشارات ──
