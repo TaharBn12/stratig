@@ -390,3 +390,76 @@ def test_only_accepts_the_display_name_or_the_key(capsys):
     labmod.main(["--synthetic", "--bars", "200", "--series", "1", "--folds", "2",
                  "--only", "اختراق دونشيان"])
     assert "المرشّحون: 3" in capsys.readouterr().out
+
+
+# ═══════════════ شرط النوافذ + تحذير الهامش الضئيل ═══════════════
+
+def test_rejects_a_winner_measured_on_too_few_windows(monkeypatch):
+    """3 نوافذ لا تقيس التكرار: ثبات «2 من 3» قرعة، لا دليل.
+
+    هذا بالضبط ما ظهر على بيانات ONE الحقيقية (381 شمعة، 3 نوافذ):
+    مرشّح بهامش +0.018R كان سيُقبل لولا هذا الشرط.
+    """
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},   # تدريب
+        {"trades": 100, "expectancy_r": 0.02},   # اختبار (هامش ضئيل)
+        {"trades": 20, "expectancy_r": 0.30},    # 3 نوافذ فقط
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": -0.10},
+    ])
+    result = labmod.evaluate_candidate("قليل النوافذ", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.windows == 3
+    assert result.accepted is False
+    assert any("نوافذ فقط" in r for r in result.reasons)
+
+
+def test_flags_a_thin_margin_without_rejecting_it(monkeypatch):
+    """هامش خارج العينة قريب من الصفر ⇒ ⚠️ تحذير لا ❌ رفض (العمولة تختلف)."""
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},
+        {"trades": 100, "expectancy_r": 0.018},        # +0.018R = ضجيج
+        {"trades": 20, "expectancy_r": 0.20},
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": 0.15},
+        {"trades": 20, "expectancy_r": 0.10},
+        {"trades": 20, "expectancy_r": 0.05},
+    ])
+    result = labmod.evaluate_candidate("هامش ضئيل", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.accepted is True
+    assert result.thin is True
+    assert any("هامش ضئيل" in r for r in result.reasons)
+
+
+def test_a_huge_margin_is_not_flagged_as_thin(monkeypatch):
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},
+        {"trades": 100, "expectancy_r": 0.60},
+        {"trades": 20, "expectancy_r": 0.20},
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": 0.15},
+        {"trades": 20, "expectancy_r": 0.10},
+        {"trades": 20, "expectancy_r": 0.05},
+    ])
+    result = labmod.evaluate_candidate("هامش واضح", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.accepted is True and result.thin is False
+
+
+def test_baseline_prints_the_current_strategies_as_reference(tmp_path, capsys):
+    """--baseline: هل الجديد أفضل مما تستعمله اليوم على نفس البيانات؟"""
+    rows = ["time,open,high,low,close,volume"]
+    for i in range(400):
+        base = 100.0 + i * 0.01
+        rows.append(f"1700000000000,{base},{base + 0.5},{base - 0.5},{base + 0.2},1000")
+    path = tmp_path / "ref.csv"
+    path.write_text("\n".join(rows), encoding="utf-8")
+
+    labmod.main(["--csv", str(path), "--folds", "8", "--min-trades", "5",
+                 "--baseline"])
+    out = capsys.readouterr().out
+    assert "المرجع" in out and "الحالية" in out

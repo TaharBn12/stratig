@@ -51,7 +51,7 @@ jobs:
             SYM=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/SYMBOL/{print $2}')
             TF=$(echo  "$LINE" | tr ' ' '\n' | awk -F= '/^TF/{print $2}')
             DAY=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/DAYS/{print $2}')
-            OUT="data/${SYM}-${TF}.csv"
+            OUT="data/${SYM}-${TF}-${DAY}d.csv"
             echo "=== جلب $SYM $TF آخر $DAY يوماً ==="
             python scripts/fetch_candles.py --symbol "$SYM" --tf "$TF" \
               --days "$DAY" --out "$OUT" --quiet

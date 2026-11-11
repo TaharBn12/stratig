@@ -42,6 +42,18 @@ from scripts.optimize import (                           # noqa: E402
     split_candles,
 )
 
+# أدنى عدد نوافذ لقياس «الثبات». نافذة أو ثلاث لا تقيس التكرار:
+# ثبات 67% على 3 نوافذ يعني «2 من 3» — أي قرعة. خمس نوافذ حدٌّ أدنى.
+MIN_WINDOWS = 5
+
+# مرجع للمقارنة فقط: الاستراتيجيتان الموجودتان أصلاً. ليستا من المرشّحين
+# (لا تدخلان في تصحيح بونفيروني) — الغرض أن ترى: هل الجديد أفضل من الذي
+# تستعمله اليوم على **نفس** البيانات؟
+BASELINES: list[tuple[str, str]] = [
+    ("الحالية: الدفتر", "scalping_i"),
+    ("الحالية: الأصلية", "rsi_williams"),
+]
+
 # المرشّحون: (اسم العرض، مفتاح الاستراتيجية، قائمة تركيبات المعاملات)
 # التركيبات قليلة ومتعمدة: كلما زاد عدد المرشّحين زاد احتمال الفائز المزيّف.
 CANDIDATES: list[tuple[str, str, list[dict]]] = [
@@ -92,6 +104,7 @@ class Result:
     consistency: float = 0.0
     window_stats: object = None
     accepted: bool = False
+    thin: bool = False                 # هامش خارج العينة داخل ضجيج التكلفة
     reasons: list[str] = field(default_factory=list)
 
     @property
@@ -146,6 +159,7 @@ def evaluate_candidate(
     folds: int = 4,
     split: float = 0.7,
     entry_delay: int = 1,
+    min_windows: int = MIN_WINDOWS,
 ) -> Result:
     """يقيس مرشّحاً واحداً بكل الشروط، ويُرجع القرار مع أسبابه."""
     result = Result(name=name, strategy=strategy, params=params)
@@ -188,8 +202,18 @@ def evaluate_candidate(
         result.reasons.append(
             f"❌ الثبات {result.consistency * 100:.0f}% "
             f"({result.positive_windows}/{result.windows} نوافذ) — أقل من 60%")
-    if result.windows == 0:
-        result.reasons.append("❌ لا نوافذ كافية لقياس الثبات")
+    if result.windows < min_windows:
+        result.reasons.append(
+            f"❌ {result.windows} نوافذ فقط (المطلوب {min_windows}) — الثبات "
+            "يُقاس بالتكرار، ونافذتان أو ثلاث لا تقول شيئاً عن التكرار")
+
+    # هامش ضئيل: ربح خارج العينة لا يغطّي تكلفة الصفقة نفسها.
+    # (لا نرفضه تلقائياً لأن العمولة تختلف بين المنصّات، لكن نُبرزه)
+    if result.test_r > 0 and result.test_r < 0.1:
+        result.thin = True
+        result.reasons.append(
+            f"⚠️ هامش ضئيل: خارج العينة {result.test_r:+.3f}R — قريب من الصفر "
+            "وربما لا يغطّي عمولة الذهاب والعودة")
 
     # ── الدلالة: على مستوى **النوافذ** لا الصفقات ──
     # تنبيه: تكرار قيمة واحدة لصنع عيّنة يُنتج تشتّتاً صفرياً أي دلالة
@@ -205,10 +229,12 @@ def evaluate_candidate(
                 f"{result.window_stats.lower_r:+.3f}R و "
                 f"{result.window_stats.upper_r:+.3f}R)")
 
-    result.accepted = (not result.reasons
+    blocking = [r for r in result.reasons if r.startswith("❌")]
+    result.accepted = (not blocking
                        and result.trades >= min_trades
                        and result.test_r > 0
-                       and (result.windows == 0 or result.consistency >= 0.6))
+                       and result.windows >= min_windows
+                       and result.consistency >= 0.6)
     if result.accepted:
         result.reasons.append(
             f"✅ مقبولة: {result.trades} صفقة · خارج العينة {result.test_r:+.3f}R · "
@@ -222,10 +248,12 @@ def _params_text(params: dict) -> str:
 
 
 def report(results: list[Result], *, min_trades: int, folds: int,
-           elapsed: float = 0.0) -> None:
+           elapsed: float = 0.0, min_windows: int = MIN_WINDOWS,
+           synthetic: bool = True, baselines: list[Result] | None = None) -> None:
     line = "─" * 74
     print(f"\n{line}")
-    print(f"  🧪 مختبر الاستراتيجيات — شرط القبول: {min_trades}+ صفقة · ثبات ≥ 60%")
+    print(f"  🧪 مختبر الاستراتيجيات — القبول: {min_trades}+ صفقة · ثبات ≥ 60%"
+          f" · {min_windows}+ نوافذ")
     print(line)
 
     results = sorted(results, key=lambda r: r.score, reverse=True)
@@ -246,6 +274,14 @@ def report(results: list[Result], *, min_trades: int, folds: int,
         for reason in item.reasons:
             print(f"     {reason}")
 
+    if baselines:
+        print("\n  ── المرجع: استراتيجيتاك الحاليتان (نفس البيانات) ──")
+        for item in baselines:
+            print(f"  {item.name:<16}{item.trades:>7}{item.train_r:>+9.3f}"
+                  f"{item.test_r:>+9.3f}"
+                  f"{(f'{item.consistency * 100:.0f}%' if item.windows else '—'):>9}"
+                  f"   {(f'{item.windows} نوافذ' if item.windows else '—')}")
+
     winners = [r for r in results if r.accepted]
     print(f"\n{line}")
     if winners:
@@ -253,8 +289,12 @@ def report(results: list[Result], *, min_trades: int, folds: int,
         for item in winners:
             print(f"     • {item.name}: {_params_text(item.params)}")
             print(f"       /strategy {item.strategy}")
-        print("\n  ⚠️ تذكّر: النتيجة بقدر جودة بياناتها. أعد التشغيل على")
-        print("     بياناتك الحقيقية قبل الاعتماد.")
+        if any(item.thin for item in winners):
+            print("\n  ⚠️ بعض الفائزين بهامش ضئيل — راجع سطر «هامش ضئيل» أعلاه"
+                  "\n     قبل أن تتداول به.")
+        if synthetic:
+            print("\n  ⚠️ تذكّر: بيانات اصطناعية. أعد التشغيل بـ --csv على"
+                  "\n     شموعك الحقيقية قبل الاعتماد.")
     else:
         print("  ⛔ **لم يصمد أي مرشّح.**")
         print("     هذا خبر جيّد: أفضل من أن تتداول استراتيجية تبدو رابحة")
@@ -271,10 +311,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bars", type=int, default=1200)
     parser.add_argument("--series", type=int, default=4)
     parser.add_argument("--split", type=float, default=0.7)
-    parser.add_argument("--folds", type=int, default=4)
+    parser.add_argument("--folds", type=int, default=8,
+                        help="نوافذ المشي للأمام (أكثر ⇒ حكم أدقّ على الثبات)")
     parser.add_argument("--min-trades", type=int, default=80,
                         help="أدنى عدد صفقات لقبول المرشّح")
     parser.add_argument("--min-consistency", type=float, default=0.6)
+    parser.add_argument("--min-windows", type=int, default=MIN_WINDOWS,
+                        help=f"أدنى نوافذ لقياس الثبات (الافتراضي {MIN_WINDOWS})")
+    parser.add_argument("--baseline", action="store_true",
+                        help="أضف استراتيجيتَيك الحاليتَين مرجعاً للمقارنة")
     parser.add_argument("--delay", type=int, default=1)
     parser.add_argument("--regime", default="mixed",
                         choices=("trend", "range", "mixed"))
@@ -316,7 +361,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.csv:
         print("  ⚠️ اصطناعية — للتحقّق من الأداة فقط، لا يُستنتج منها")
     print(f"  المرشّحون: {total} · الشروط: {args.min_trades}+ صفقة،"
-          f" ثبات ≥ {args.min_consistency * 100:.0f}%")
+          f" ثبات ≥ {args.min_consistency * 100:.0f}%،"
+          f" {args.min_windows}+ نوافذ")
     print(f"  (تصحيح بونفيروني: {total} مرشّحاً ⇒ عتبة أعلى)")
 
     started = time.time()
@@ -329,12 +375,23 @@ def main(argv: list[str] | None = None) -> int:
             results.append(evaluate_candidate(
                 name, strategy, params, series,
                 min_trades=args.min_trades, folds=args.folds,
-                split=args.split, entry_delay=args.delay))
+                split=args.split, entry_delay=args.delay,
+                min_windows=args.min_windows))
             done += 1
             print(f"    … {done}/{total}", flush=True)
 
+    baselines = []
+    if args.baseline:
+        for name, strategy in BASELINES:
+            baselines.append(evaluate_candidate(
+                name, strategy, {}, series,
+                min_trades=args.min_trades, folds=args.folds,
+                split=args.split, entry_delay=args.delay,
+                min_windows=args.min_windows))
+
     report(results, min_trades=args.min_trades, folds=args.folds,
-           elapsed=time.time() - started)
+           elapsed=time.time() - started, min_windows=args.min_windows,
+           synthetic=not args.csv, baselines=baselines)
 
     if args.json:
         import json
