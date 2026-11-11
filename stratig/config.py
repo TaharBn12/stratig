@@ -96,6 +96,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_notional": 20,
         "daily_max_trades": 0,
         "daily_max_loss_usdt": 0,
+        # ── حجم الصفقة: ثابت أم حسب التقلّب ──
+        # "fixed" = trade.qty_usdt كما هو · "risk" = يُحسب بحيث تكون
+        # الخسارة عند الوقف = risk_per_trade_pct × الرصيد (مُستحسن في الوضع التلقائي)
+        "sizing": "fixed",
+        "risk_per_trade_pct": 0.01,     # 1% من الرصيد مخاطرة لكل صفقة
+        "max_qty_usdt": 0,              # 0 = بلا حد
+        "min_qty_usdt": 0,
+        # ── معدّل الدخول (يمنع الإفراط في التداول) ──
+        "max_trades_per_hour": 0,       # 0 = بلا حد
+        "min_gap_seconds": 0,           # فاصل إلزامي بين صفقتين
+        # ── قاطع الخسائر المتتالية ──
+        "max_consecutive_losses": 0,    # 0 = معطّل · 3 = مُستحسن
+        "pause_after_losses_seconds": 3600,
+        # ── إدارة الصفقة المفتوحة (نقل الوقف للتعادل + وقف متحرك) ──
+        # اختياري ومُعطّل افتراضياً: يتطلّب إلغاء الأوامر الشرطية وإعادة وضعها
+        "manage_positions": False,
+        "manage_interval_seconds": 60,
+        "breakeven_after_r": 1.0,        # بعد 1R انقل الوقف إلى نقطة التعادل
+        "breakeven_offset_pct": 0.0006,  # هامش يغطّي العمولة (≈ 0.06%)
+        "trailing": False,               # وقف متحرك
+        "trail_distance_mult": 1.0,      # مسافة التتبّع = × مسافة الوقف الأصلية
+        "max_hold_seconds": 0,           # 0 = معطّل · أغلق الصفقة بعد هذه المدة
+        # ── سجل الصفقات (لإحصائيات /stats) ──
+        "journal_path": "state/trades.json",
+        "journal_limit": 1000,
     },
     "scanner": {
         "autostart": True,

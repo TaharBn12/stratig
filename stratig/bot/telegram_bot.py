@@ -61,6 +61,7 @@ TEXT_COMMANDS = {
     "▶️ تشغيل المسح": "resume",
     "🔴 تنفيذ حقيقي": "live",
     "🧪 محاكاة": "dryrun",
+    "📉 إحصائياتي": "stats",
     "❔ مساعدة": "help",
 }
 
@@ -92,6 +93,16 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "topn": ("scanner.top_n", "int", "عدد الرموز المفحوصة — 0 = كل العملات"),
     "maxsig": ("scanner.max_signals_per_scan", "int", "أقصى إشارات في الفحص الواحد — مثال: 5"),
     "minnotional": ("risk.min_notional", "float", "أدنى قيمة للصفقة بالـ USDT — مثال: 20"),
+    "sizing": ("risk.sizing", "choice:fixed,risk",
+               "حجم الصفقة: fixed = ثابت · risk = خسارة ثابتة = نسبة من الرصيد"),
+    "riskpct": ("risk.risk_per_trade_pct", "float",
+                "نسبة المخاطرة من الرصيد لكل صفقة — مثال: 0.01 (1%)"),
+    "maxqty": ("risk.max_qty_usdt", "float", "أقصى قيمة للصفقة بالـ USDT (0 = بلا حد)"),
+    "maxtrades": ("risk.max_trades_per_hour", "int", "أقصى صفقات في الساعة (0 = بلا حد)"),
+    "mingap": ("risk.min_gap_seconds", "int", "فاصل إلزامي بين صفقتين بالثواني"),
+    "maxlosses": ("risk.max_consecutive_losses", "int",
+                  "قاطع: أوقف التداول بعد كم خسارة متتالية (0 = معطّل)"),
+    "pauseloss": ("risk.pause_after_losses_seconds", "int", "مدة الإيقاف بالثواني بعد القاطع"),
     "mode": ("execution.mode", "choice:manual,auto", "وضع التنفيذ"),
     "dryrun": ("safety.dry_run", "bool", "المحاكاة (لا تُرسل أوامر حقيقية)"),
     "both": ("strategy.require_both", "bool", "التأكيد المزدوج (RSI + Williams %R)"),
@@ -171,6 +182,7 @@ class TelegramBot:
             ("reload", self._reload),
             ("strategy", self._strategy),
             ("tf", self._timeframe),
+            ("stats", self._stats),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -319,6 +331,7 @@ class TelegramBot:
                 log.warning("تعذّرت إعادة قراءة الإعدادات: %s", err)
             try:
                 await self.trader.notify_expired()
+                await self.trader.manage_positions()   # تعادل / متحرك / إغلاق
                 await self.trader.scan_once()
             except Exception as err:  # مهمة دورية يجب ألا تسقط البوت
                 log.exception("خطأ في مهمة الفحص: %s", err)
@@ -779,6 +792,14 @@ class TelegramBot:
         return InlineKeyboardMarkup(rows)
 
     @restricted
+    async def _stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/stats — إحصائياتك الحقيقية من سجل الصفقات."""
+        await self._reply(
+            update,
+            fmt.stats_text(self.trader.journal, self.trader.rate, self.trader.breaker),
+        )
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -1007,6 +1028,7 @@ class TelegramBot:
             "balance": self._balance,
             "positions": self._positions,
             "pnl": self._pnl,
+            "stats": self._stats,
             "scan": self._scan,
             "scanall": self._scan_all,
             "settings": self._settings,

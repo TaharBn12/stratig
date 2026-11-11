@@ -539,6 +539,74 @@ class BinanceFutures(ExchangeBase):
             )
         return result
 
+    def replace_protection(
+        self, symbol: str, side: str, sl_price: float, tp_price: float | None = None
+    ) -> bool:
+        """يلغي الأوامر الشرطية الحالية ويضع وقفاً جديداً (ثم الهدف إن وُجد).
+
+        الترتيب مهم: **الوقف أولاً** — لأن نافذة بلا حماية قصيرة مقبولة،
+        أما صفقة بلا هدف فهي مجرد ربح أقل.
+        """
+        side = str(side).lower()
+        if side not in (BUY, SELL):
+            return False
+        info = self.symbol_info(symbol)
+        close_side = "SELL" if side == BUY else "BUY"
+        position_side = ("LONG" if side == BUY else "SHORT") if self._dual_side else None
+        working = "MARK_PRICE" if str(
+            self._tp_trigger_default()).lower() == "mark_price" else "CONTRACT_PRICE"
+
+        self.cancel_algo_orders(symbol)
+        ok = False
+        for attempt in (
+            {"close_position": True, "quantity": None},
+            None if self._dual_side else {
+                "close_position": False,
+                "quantity": fmt_num(self._position_qty(symbol), info.qty_precision),
+            },
+        ):
+            if attempt is None:
+                continue
+            try:
+                self.place_conditional_order(
+                    symbol=symbol,
+                    side=close_side,
+                    order_type="STOP_MARKET",
+                    trigger_price=sl_price,
+                    precision=info.price_precision,
+                    working_type=working,
+                    position_side=position_side,
+                    close_position=attempt["close_position"],
+                    quantity=attempt["quantity"],
+                )
+                ok = True
+                break
+            except Exception as err:
+                log.warning("[%s] تعذّر تحديث الوقف: %s", symbol, err)
+        if ok and tp_price:
+            try:
+                self.place_conditional_order(
+                    symbol=symbol,
+                    side=close_side,
+                    order_type="TAKE_PROFIT_MARKET",
+                    trigger_price=tp_price,
+                    precision=info.price_precision,
+                    working_type=working,
+                    position_side=position_side,
+                    close_position=True,
+                    quantity=None,
+                )
+            except Exception as err:
+                log.warning("[%s] تعذّر إعادة وضع الهدف: %s", symbol, err)
+        return ok
+
+    def _tp_trigger_default(self) -> str:
+        return "mark_price"
+
+    def _position_qty(self, symbol: str) -> float:
+        pos = self.get_position(symbol)
+        return abs(pos.size) if pos else 0.0
+
     def _place_protection(
         self,
         symbol: str,

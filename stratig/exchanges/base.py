@@ -160,6 +160,15 @@ class ExchangeBase(ABC):
     @abstractmethod
     def close_position(self, symbol: str) -> OrderResult | None: ...
 
+    def replace_protection(
+        self, symbol: str, side: str, sl_price: float, tp_price: float | None = None
+    ) -> bool:
+        """يستبدل وقف الخسارة (وجني الأرباح) للصفقة المفتوحة — لإدارة المخاطر.
+
+        اختياري: المنصات التي لا تدعمه تُرجع False فيُعطّل البوت الميزة بصمت.
+        """
+        return False
+
     # ---------- إعدادات الرمز ----------
     def set_leverage(self, symbol: str, leverage: int) -> None:
         """اختياري — يُتجاهل إن لم تدعمه المنصة."""
