@@ -42,6 +42,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "candles": 500,
         "use_closed_candles": True,
         "require_both": True,
+        # ── فلاتر جودة الإشارة (اختيارية، مُعطّلة افتراضياً) ──
+        # "إشارات كثيرة لكن ضعيفة": الفلاتر تقلّل العدد وتبقي الأفضل،
+        # وتعمل **بعد** حساب الإشارة فلا تُغيّر منطق أي استراتيجية.
+        "quality_enabled": False,
+        "regime": "off",               # off | trend | range  (حسب ADX)
+        "adx_length": 14,
+        "adx_trend_min": 25.0,         # أقل من هذا = بلا اتجاه
+        "adx_range_max": 20.0,         # أكثر من هذا = متّجه بقوة
+        "mtf_enabled": False,          # تأكيد من إطار أعلى
+        "mtf_timeframe": "1h",
+        "mtf_ema_period": 50,
+        "volatility_min_pct": 0.0,     # استبعد الساكن (0 = معطّل)
+        "volatility_max_pct": 0.0,     # استبعد الهائج (0 = معطّل)
         # فلتر الاتجاه (اختياري، مُعطّل افتراضياً حتى تبقى الاستراتيجيات حرفية)
         # "off" = كماهي · "ema" = ارفض الإشارات المعاكسة للاتجاه العام
         "trend_filter": "off",

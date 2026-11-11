@@ -12,6 +12,8 @@ from typing import Optional
 
 from ..config import PROJECT_ROOT, Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
+from ..strategy.filters import apply_filters
+from ..strategy.indicators import adx, atr_pct, ema
 from ..strategy.engine import Decision
 from ..risk import (
     CircuitBreaker,
@@ -435,6 +437,9 @@ class Trader:
         if not decision.has_signal:
             return None
 
+        if not self._mtf_passes(symbol, decision):
+            return None
+
         # صرامة: القرار يجب أن يكون صادراً من الاستراتيجية المختارة
         # وعلى نفس الإطار المطلوب — وإلا نرفضه بدل تمريره
         if decision.strategy and decision.strategy != strategy.key:
@@ -506,6 +511,48 @@ class Trader:
         else:
             lines.append(f"\n🔴 عند التأكيد يُرسل أمر حقيقي إلى {_esc(self.exchange.name)}")
         return "\n".join(lines)
+
+    def _mtf_passes(self, symbol: str, decision) -> bool:
+        """تأكيد الإطار الأعلى — الإشارتان الأخريان (ADX/تقلّب) في السجل.
+
+        معطّل افتراضياً (`strategy.quality_enabled` + `strategy.mtf_enabled`).
+        """
+        if not bool(self.cfg.get("strategy.quality_enabled", False)):
+            return True
+        if not bool(self.cfg.get("strategy.mtf_enabled", False)):
+            return True
+        g = self.cfg.get
+        higher_tf = str(g("strategy.mtf_timeframe", "1h") or "1h")
+        period = int(g("strategy.mtf_ema_period", 50) or 50)
+        try:
+            higher = self._resolve_higher(self.cfg.effective_timeframe(), higher_tf)
+            htf = self.exchange.klines(symbol, higher, 250)
+        except Exception as err:  # pragma: no cover
+            log.debug("[%s] تعذّر جلب الإطار الأعلى: %s", symbol, err)
+            return True
+        if len(htf) < period + 5:
+            return True
+        return apply_filters(
+            decision,
+            mtf_enabled=True,
+            mtf_timeframe=higher,
+            higher_close=htf.last_close,
+            higher_ema=ema(list(htf.close), period)[-1],
+        )
+
+    @staticmethod
+    def _resolve_higher(current: str, requested: str) -> str:
+        """إن كان الإطار المطلوب للتأكيد مساوياً للحالي (أو أقل) → نصعده."""
+        ladder = ("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h",
+                  "12h", "1d", "3d", "1w")
+        try:
+            here = ladder.index(str(current).lower())
+        except ValueError:
+            return requested
+        for step in range(here + 1, len(ladder)):
+            if ladder[step] == str(requested).lower():
+                return ladder[step]
+        return ladder[min(here + 2, len(ladder) - 1)]
 
     def _signal_freshness(self, sig: "PendingSignal") -> str:
         """/"كم تأخّرت عن سعر الإشارة؟" — الدخول المتأخر يقتل ميزة الإشارة."""
