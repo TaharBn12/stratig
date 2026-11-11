@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLEAN = [
     "PORT", "WEB_HOST", "WEB_TOKEN", "WEB_ENABLED",
     "SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_ANON_KEY",
-    "SUPABASE_BOT_ID", "SUPABASE_ENABLED",
+    "SUPABASE_BOT_ID", "SUPABASE_ENABLED", "BOT_ID",
     "EXCHANGE", "TESTNET", "DRY_RUN",
     "KEEP_AWAKE", "KEEP_AWAKE_URL", "KEEP_AWAKE_INTERVAL", "RENDER",
 ]
@@ -107,6 +107,18 @@ def test_supabase_can_be_disabled_explicitly(env, tmp_path):
     cfg = make_config(tmp_path, SUPABASE_URL="https://x.supabase.co", SUPABASE_KEY="k",
                       SUPABASE_ENABLED="false")
     assert cfg.get("supabase.enabled") is False
+
+
+def test_bot_id_accepts_vercel_name(env, tmp_path):
+    """Vercel يقرأ BOT_ID و بايثون يقرأ SUPABASE_BOT_ID — نفس المعنى."""
+    cfg = make_config(tmp_path, BOT_ID="render")
+    assert cfg.get("supabase.bot_id") == "render"
+
+
+def test_supabase_bot_id_wins_over_bot_id(env, tmp_path):
+    """الاسم الأخص يطغى عند وجود الاثنين."""
+    cfg = make_config(tmp_path, SUPABASE_BOT_ID="a", BOT_ID="b")
+    assert cfg.get("supabase.bot_id") == "a"
 
 
 def test_supabase_bot_id_and_anon_key(env, tmp_path):

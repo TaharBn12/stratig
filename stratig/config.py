@@ -355,7 +355,10 @@ class Config:
         sb_key = os.getenv("SUPABASE_KEY")
         if sb_key:
             self.set("supabase.key", sb_key.strip())
-        sb_id = os.getenv("SUPABASE_BOT_ID")
+        # BOT_ID هو الاسم الذي تستخدمه وظيفة Vercel — نقبله بديلاً حتى
+        # تعمل نفس الأسماء على المنصّتين (وإلا دفع البوت تحت "default"
+        # بينما اللوحة تسأل عن "render" فتظهر فارغة بلا سبب واضح).
+        sb_id = os.getenv("SUPABASE_BOT_ID") or os.getenv("BOT_ID")
         if sb_id:
             self.set("supabase.bot_id", sb_id.strip())
         # المفتاح الذي يراه المتصفح — يُقرأ فقط، ولا يُستبدل بمفتاح service
