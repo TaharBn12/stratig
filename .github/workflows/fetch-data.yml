@@ -1,0 +1,54 @@
+name: fetch-data
+
+# ⚠️ أداة داخليّة: تجلب شموعاً حقيقية من OKX وترفعها كـ artifact.
+# السبب: بيئة التطوير هنا **بلا إنترنت خارجي**، فلا يمكن تنزيل البيانات
+# مباشرة. المستخدم العادي لا يحتاجها — عنده `scripts/fetch_candles.py`
+# يعمل على جهازه مباشرة.
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "العملة"
+        required: false
+        default: "ONEUSDT"
+      tf:
+        description: "إطار الشمعة"
+        required: false
+        default: "15m"
+      days:
+        description: "كم يوماً للخلف"
+        required: false
+        default: "4"
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: جلب الشموع
+        run: |
+          mkdir -p data
+          python scripts/fetch_candles.py \
+            --symbol "${{ inputs.symbol }}" \
+            --tf "${{ inputs.tf }}" \
+            --days "${{ inputs.days }}" \
+            --out "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+
+      - name: فحص سريع
+        run: |
+          wc -l "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+          head -3 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+          tail -2 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candles-${{ inputs.symbol }}-${{ inputs.tf }}
+          path: data/*.csv
