@@ -390,3 +390,129 @@ def test_only_accepts_the_display_name_or_the_key(capsys):
     labmod.main(["--synthetic", "--bars", "200", "--series", "1", "--folds", "2",
                  "--only", "اختراق دونشيان"])
     assert "المرشّحون: 3" in capsys.readouterr().out
+
+
+# ═══════════════ شرط النوافذ + تحذير الهامش الضئيل ═══════════════
+
+def test_rejects_a_winner_measured_on_too_few_windows(monkeypatch):
+    """3 نوافذ لا تقيس التكرار: ثبات «2 من 3» قرعة، لا دليل.
+
+    هذا بالضبط ما ظهر على بيانات ONE الحقيقية (381 شمعة، 3 نوافذ):
+    مرشّح بهامش +0.018R كان سيُقبل لولا هذا الشرط.
+    """
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},   # تدريب
+        {"trades": 100, "expectancy_r": 0.02},   # اختبار (هامش ضئيل)
+        {"trades": 20, "expectancy_r": 0.30},    # 3 نوافذ فقط
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": -0.10},
+    ])
+    result = labmod.evaluate_candidate("قليل النوافذ", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.windows == 3
+    assert result.accepted is False
+    assert any("نوافذ فقط" in r for r in result.reasons)
+
+
+def test_flags_a_thin_margin_without_rejecting_it(monkeypatch):
+    """هامش خارج العينة قريب من الصفر ⇒ ⚠️ تحذير لا ❌ رفض (بلا عمولة هنا)."""
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},
+        {"trades": 100, "expectancy_r": 0.018},        # +0.018R = ضجيج
+        {"trades": 20, "expectancy_r": 0.20},
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": 0.15},
+        {"trades": 20, "expectancy_r": 0.10},
+        {"trades": 20, "expectancy_r": 0.05},
+    ])
+    result = labmod.evaluate_candidate("هامش ضئيل", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4, fee_pct=0.0)
+    assert result.accepted is True
+    assert result.thin is True
+    assert any("هامش ضئيل" in r for r in result.reasons)
+
+
+def test_rejects_a_candidate_that_dies_after_fees(monkeypatch):
+    """الربح الخامّ لا يكفي: إن أكلت العمولة الهامش كله ⇒ مرفوض.
+
+    هذا بالضبط ما حدث على ONE/5m: ثلاثة مرشّحين بهامش خامّ
+    +0.03R…+0.09R، ووقف قصير ⇒ عمولة ≈ 0.07R ⇒ الصافي ≈ صفر أو سالب.
+    """
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},
+        {"trades": 100, "expectancy_r": 0.018},        # خامّ: رابح
+        {"trades": 20, "expectancy_r": 0.20},
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": 0.15},
+        {"trades": 20, "expectancy_r": 0.10},
+        {"trades": 20, "expectancy_r": 0.05},
+    ])
+    result = labmod.evaluate_candidate("يأكله العمولة", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.fee_r > 0
+    assert result.net_r < result.test_r
+    assert result.accepted is False
+    assert any("بعد العمولة" in r for r in result.reasons)
+
+
+def test_a_huge_margin_is_not_flagged_as_thin(monkeypatch):
+    _patch(monkeypatch, [
+        {"trades": 100, "expectancy_r": 0.40},
+        {"trades": 100, "expectancy_r": 0.60},
+        {"trades": 20, "expectancy_r": 0.20},
+        {"trades": 20, "expectancy_r": 0.25},
+        {"trades": 20, "expectancy_r": 0.15},
+        {"trades": 20, "expectancy_r": 0.10},
+        {"trades": 20, "expectancy_r": 0.05},
+    ])
+    result = labmod.evaluate_candidate("هامش واضح", "ema_momentum", {},
+                                       [synthetic_series(200, seed=1)],
+                                       min_trades=80, folds=4)
+    assert result.accepted is True and result.thin is False
+
+
+def test_baseline_prints_the_current_strategies_as_reference(tmp_path, capsys):
+    """--baseline: هل الجديد أفضل مما تستعمله اليوم على نفس البيانات؟"""
+    rows = ["time,open,high,low,close,volume"]
+    for i in range(400):
+        base = 100.0 + i * 0.01
+        rows.append(f"1700000000000,{base},{base + 0.5},{base - 0.5},{base + 0.2},1000")
+    path = tmp_path / "ref.csv"
+    path.write_text("\n".join(rows), encoding="utf-8")
+
+    labmod.main(["--csv", str(path), "--folds", "8", "--min-trades", "5",
+                 "--baseline"])
+    out = capsys.readouterr().out
+    assert "المرجع" in out and "الحالية" in out
+
+
+# ═══════════════════════════ تكلفة الصفقة ═══════════════════════════
+
+def test_fee_drag_is_zero_when_no_fee():
+    series = [synthetic_series(300, seed=3)]
+    assert labmod.fee_drag_r(series, "ema_momentum", {}, fee_pct=0.0) == 0.0
+    assert labmod.fee_drag_r([], "ema_momentum", {}) == 0.0
+
+
+def test_a_wider_stop_means_a_smaller_fee_in_r():
+    """العمولة بوحدة R تتناقص كلما اتّسع الوقف: fee_r = 2×العمولة ÷ بُعد الوقف."""
+    series = [synthetic_series(400, seed=3)]
+    narrow = labmod.fee_drag_r(series, "ema_momentum",
+                               {"strategy.ema_momentum.sl_coef": 1.0})
+    wide = labmod.fee_drag_r(series, "ema_momentum",
+                             {"strategy.ema_momentum.sl_coef": 4.0})
+    assert 0 < wide < narrow
+    assert abs(wide - narrow / 4) < narrow * 0.01      # علاقة عكسية بالضبط
+
+
+def test_fee_drag_uses_the_strategy_defaults_when_params_are_empty():
+    """إن لم تُعطَ معاملات، نقرأ الافتراضي من config — لا نخترع رقماً."""
+    series = [synthetic_series(400, seed=3)]
+    value = labmod.fee_drag_r(series, "donchian_breakout", {})
+    manual = labmod.fee_drag_r(series, "donchian_breakout",
+                               {"strategy.donchian_breakout.sl_coef": 2.0,
+                                "strategy.donchian_breakout.atr_length": 14})
+    assert abs(value - manual) < 1e-9

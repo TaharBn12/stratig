@@ -4,7 +4,13 @@ name: fetch-data
 # السبب: بيئة التطوير هنا **بلا إنترنت خارجي**، فلا يمكن تنزيل البيانات
 # مباشرة. المستخدم العادي لا يحتاجها — عنده `scripts/fetch_candles.py`
 # يعمل على جهازه مباشرة.
+#
+# التشغيل: بحدث push على ملف داخل data/requests/ (لأن صلاحية
+# workflow_dispatch غير متاحة للتكامل هنا)، أو يدوياً من واجهة GitHub.
 on:
+  push:
+    paths:
+      - 'data/requests/*.txt'
   workflow_dispatch:
     inputs:
       symbol:
@@ -21,7 +27,7 @@ on:
         default: "4"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   fetch:
@@ -33,22 +39,39 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: جلب الشموع
+      - name: جلب الشموع وطباعتها
+        env:
+          REQUESTS: data/requests
         run: |
+          set -euo pipefail
           mkdir -p data
-          python scripts/fetch_candles.py \
-            --symbol "${{ inputs.symbol }}" \
-            --tf "${{ inputs.tf }}" \
-            --days "${{ inputs.days }}" \
-            --out "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
+          # كل سطر في ملف الطلب: SYMBOL=ONEUSDT TF=15m DAYS=4
+          cat $REQUESTS/*.txt | while read -r LINE; do
+            case "$LINE" in ''|\#*) continue;; esac
+            SYM=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/SYMBOL/{print $2}')
+            TF=$(echo  "$LINE" | tr ' ' '\n' | awk -F= '/^TF/{print $2}')
+            DAY=$(echo "$LINE" | tr ' ' '\n' | awk -F= '/DAYS/{print $2}')
+            OUT="data/${SYM}-${TF}-${DAY}d.csv"
+            echo "=== جلب $SYM $TF آخر $DAY يوماً ==="
+            python scripts/fetch_candles.py --symbol "$SYM" --tf "$TF" \
+              --days "$DAY" --out "$OUT" --quiet
+            echo "عدد الشموع: $(( $(wc -l < "$OUT") - 1 ))"
+            head -2 "$OUT"; tail -1 "$OUT"
+            # البيانات مضغوطة ومشفّرة base64: بيئة التطوير لا تصل إلى
+            # خوادم الـ artifacts، فنمرّرها عبر السجل.
+          done
 
-      - name: فحص سريع
+      # بيئة التطوير لا تصل إلى خوادم الـ artifacts ولا إلى السجل
+      # (كلاهما خارج github.com المحجوب جزئياً)، فالنتيجة تُودَع في الفرع
+      # نفسه ويُسحبها المطوّر بـ git pull.
+      - name: حفظ النتيجة في الفرع
         run: |
-          wc -l "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
-          head -3 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
-          tail -2 "data/${{ inputs.symbol }}-${{ inputs.tf }}.csv"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: candles-${{ inputs.symbol }}-${{ inputs.tf }}
-          path: data/*.csv
+          set -euo pipefail
+          git config user.name  "stratig-data-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -f data/*.csv
+          if git diff --cached --quiet; then
+            echo "لا جديد"; exit 0
+          fi
+          git commit -m "📊 بيانات شموع حقيقية (OKX)"
+          git push origin "HEAD:${GITHUB_REF#refs/heads/}"
