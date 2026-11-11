@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..config import PROJECT_ROOT, Config
 from ..exchanges.base import BUY, SELL, ExchangeBase, OrderResult
+from ..edge import by_strategy, measure_trades
 from ..web.server import Dashboard
 from ..web.snapshot import build_snapshot
 from ..web.supabase import SupabaseSync
@@ -192,7 +193,10 @@ class Trader:
         self.breaker.pause_seconds = float(g("risk.pause_after_losses_seconds", 3600) or 0)
 
     def risk_gate(self, now: float | None = None) -> tuple[bool, str]:
-        """بوابة قبل أي فتح: معدّل + قاطع الخسائر. (False, السبب) إن مُنع."""
+        """بوابة قبل أي فتح: معدّل + قاطع الخسائر + مقياس الميزة.
+
+        (False, السبب) إن مُنع. الترتيب مهم: الأرخص حسابياً أولاً.
+        """
         self._sync_risk()
         ok, reason = self.breaker.check(now)
         if not ok:
@@ -202,8 +206,52 @@ class Trader:
         if not ok:
             self._risk_reason = reason
             return False, reason
+        ok, reason = self.edge_gate()
+        if not ok:
+            self._risk_reason = reason
+            return False, reason
         self._risk_reason = ""
         return True, ""
+
+    def edge_stats(self, strategy: str | None = None) -> "object":
+        """مقياس الميزة — لاستراتيجية محدّدة أو لكل الاستراتيجيات."""
+        limit = int(self.cfg.get("edge.lookback", 0) or 0)
+        trades = list(self.journal.trades)
+        if limit:
+            trades = trades[-limit:]
+        if strategy:
+            trades = [t for t in trades if str(getattr(t, "strategy", "")) == strategy]
+        return measure_trades(trades, int(self.cfg.get("edge.min_trades", 30)))
+
+    def edge_report(self) -> dict[str, "object"]:
+        """الميزة مقيسة لكل استراتيجية — تعرضها /edge."""
+        limit = int(self.cfg.get("edge.lookback", 0) or 0)
+        trades = list(self.journal.trades)
+        if limit:
+            trades = trades[-limit:]
+        per = by_strategy(trades, int(self.cfg.get("edge.min_trades", 30)))
+        return {"all": measure_trades(trades, int(self.cfg.get("edge.min_trades", 30))),
+                "per_strategy": per,
+                "current": str(self.strategy_key),
+                "gate": bool(self.cfg.get("edge.gate", False))}
+
+    def edge_gate(self) -> tuple[bool, str]:
+        """يمنع التداول إن **ثبتت** خسارة الاستراتيجية الحالية إحصائياً.
+
+        الفرق عن قاطع الخسائر المتتالية: ذاك يتفاعل مع سلسلة قصيرة،
+        وهذا يحكم على **كل** العيّنة بفترة ثقة 95%.
+        """
+        if not bool(self.cfg.get("edge.gate", False)):
+            return True, ""
+        stats = self.edge_stats(str(self.strategy_key))
+        if not stats.should_block:
+            return True, ""
+        return False, (
+            f"📊 مقياس الميزة: «{self.strategy_key}» خاسرة إحصائياً — "
+            f"{stats.trades} صفقة · توقع {stats.expectancy_r:+.3f}R · "
+            f"فترة الثقة 95% بين {stats.lower_r:+.3f}R و {stats.upper_r:+.3f}R. "
+            f"لا تُفتح صفقات جديدة. راجع /edge"
+        )
 
     def sized_qty(self, sl_pct: float, default_qty: float) -> float:
         """حجم الصفقة: ثابت، أو محسوب بحيث تكون الخسارة = risk_pct × الرصيد."""

@@ -62,6 +62,7 @@ TEXT_COMMANDS = {
     "🔴 تنفيذ حقيقي": "live",
     "🧪 محاكاة": "dryrun",
     "📉 إحصائياتي": "stats",
+    "📊 مقياس الميزة": "edge",
     "🌐 لوحة التحكم": "dashboard",
     "❔ مساعدة": "help",
 }
@@ -84,6 +85,10 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
               "أقصى انحراف مسموح عن سعر الإشارة كنسبة من الوقف (1.0 = وقف كامل)"),
     "block_stale": ("execution.block_stale_entry", "bool",
                     "ارفض الدخول المتأخّر بدل التحذير فقط (true / false)"),
+    "edge": ("edge.enabled", "bool", "مقياس الميزة في /edge"),
+    "edgegate": ("edge.gate", "bool", "منع التداول عند ثبوت الخسارة إحصائياً"),
+    "edgemin": ("edge.min_trades", "int", "أدنى صفقات قبل إصدار حكم — 30"),
+    "edgelook": ("edge.lookback", "int", "0 = كل الصفقات، وإلا آخر N صفقة"),
     "webenable": ("web.enabled", "bool", "لوحة التحكم على جهازك"),
     "webport": ("web.port", "int", "منفذ لوحة التحكم — مثال: 8000"),
     "webtoken": ("web.token", "str", "رمز حماية اللوحة (فارغ = بلا حماية)"),
@@ -221,6 +226,7 @@ class TelegramBot:
             ("tf", self._timeframe),
             ("stats", self._stats),
             ("dashboard", self._dashboard),
+            ("edge", self._edge),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -863,6 +869,11 @@ class TelegramBot:
         await self._reply(update, "\n\n".join(lines))
 
     @restricted
+    async def _edge(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/edge — هل استراتيجيتك رابحة إحصائياً؟ (فترة ثقة 95%)."""
+        await self._reply(update, fmt.edge_text(self.trader.edge_report()))
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -1093,6 +1104,7 @@ class TelegramBot:
             "pnl": self._pnl,
             "stats": self._stats,
             "dashboard": self._dashboard,
+            "edge": self._edge,
             "scan": self._scan,
             "scanall": self._scan_all,
             "settings": self._settings,

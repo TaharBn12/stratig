@@ -223,3 +223,55 @@ def stats_text(journal, rate, breaker) -> str:
         "<i>التوقع الموجب مع معامل ربح &gt; 1 هو ما يثبت أن الاستراتيجية تعمل.</i>",
     ]
     return "\n".join(lines)
+
+
+def edge_text(report: dict) -> str:
+    """/edge — مقياس الميزة: هل استراتيجيتك رابحة إحصائياً؟
+
+    الفكرة: 12 صفقة رابحة قد تكون حظاً. الحكم يحتاج فترة ثقة 95%،
+    لا متوسطاً فقط. لذلك نعرض **المجال** لا الرقم المفرد.
+    """
+    lines: list[str] = ["📊 <b>مقياس الميزة</b> — هل هناك ميزة أصلاً؟", ""]
+
+    icons = {
+        "رابحة": "✅",
+        "خاسرة": "⛔",
+        "غير حاسمة": "⚖️",
+        "لا بيانات كافية": "…",
+    }
+
+    def block(title: str, stats) -> None:
+        icon = icons.get(stats.verdict, "•")
+        if stats.trades == 0:
+            lines.append(f"{icon} <b>{esc(title)}</b>: لا صفقات مسجّلة بعد")
+            return
+        lines.append(
+            f"{icon} <b>{esc(title)}</b>: {stats.verdict} · "
+            f"{stats.trades} صفقة · نجاح {stats.win_rate:.0f}%")
+        lines.append(
+            f"    التوقع <code>{stats.expectancy_r:+.3f}R</code> · "
+            f"المجموع <code>{stats.total_r:+.2f}R</code>")
+        lines.append(
+            f"    مجال الثقة 95%: <code>{stats.lower_r:+.3f}R</code> ← → "
+            f"<code>{stats.upper_r:+.3f}R</code>")
+        lines.append(f"    <i>{esc(stats.explain())}</i>")
+        lines.append("")
+
+    overall = report.get("all")
+    if overall is not None:
+        block("الإجمالي", overall)
+
+    per = report.get("per_strategy") or {}
+    if per:
+        lines.append("─── حسب الاستراتيجية ───")
+        lines.append("")
+        # الأفضل أولاً
+        for name, stats in sorted(per.items(),
+                                  key=lambda kv: kv[1].expectancy_r, reverse=True):
+            block(str(name), stats)
+
+    gate = "مُفعّلة ✅" if report.get("gate") else "معطّلة"
+    lines.append(f"🚦 بوابة الميزة (تمنع التداول عند ثبوت الخسارة): {gate}")
+    if not report.get("gate"):
+        lines.append("   فعّلها بـ: <code>/set edgegate true</code>")
+    return "\n".join(lines)
