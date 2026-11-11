@@ -62,6 +62,7 @@ TEXT_COMMANDS = {
     "🔴 تنفيذ حقيقي": "live",
     "🧪 محاكاة": "dryrun",
     "📉 إحصائياتي": "stats",
+    "🌐 لوحة التحكم": "dashboard",
     "❔ مساعدة": "help",
 }
 
@@ -83,6 +84,13 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
               "أقصى انحراف مسموح عن سعر الإشارة كنسبة من الوقف (1.0 = وقف كامل)"),
     "block_stale": ("execution.block_stale_entry", "bool",
                     "ارفض الدخول المتأخّر بدل التحذير فقط (true / false)"),
+    "webenable": ("web.enabled", "bool", "لوحة التحكم على جهازك"),
+    "webport": ("web.port", "int", "منفذ لوحة التحكم — مثال: 8000"),
+    "webtoken": ("web.token", "str", "رمز حماية اللوحة (فارغ = بلا حماية)"),
+    "supabase": ("supabase.enabled", "bool", "رفع البيانات إلى Supabase"),
+    "supabaseurl": ("supabase.url", "str", "رابط مشروع Supabase"),
+    "supabasekey": ("supabase.key", "str", "المفتاح السرّي لـ Supabase"),
+    "botid": ("supabase.bot_id", "str", "معرّف البوت في Supabase"),
     "quality": ("strategy.quality_enabled", "bool", "فلاتر الجودة: نظام السوق + MTF + تقلّب"),
     "regime": ("strategy.regime", "choice:off,trend,range",
                "نظام السوق المسموح: off = الكل · trend = اتجاهي فقط · range = جانبي فقط"),
@@ -194,6 +202,7 @@ class TelegramBot:
             ("strategy", self._strategy),
             ("tf", self._timeframe),
             ("stats", self._stats),
+            ("dashboard", self._dashboard),
             ("settings", self._settings),
             ("set", self._set),
             ("symbols", self._symbols),
@@ -344,6 +353,7 @@ class TelegramBot:
                 await self.trader.notify_expired()
                 await self.trader.manage_positions()   # تعادل / متحرك / إغلاق
                 await self.trader.scan_once()
+                await asyncio.to_thread(self.trader.push_to_supabase)
             except Exception as err:  # مهمة دورية يجب ألا تسقط البوت
                 log.exception("خطأ في مهمة الفحص: %s", err)
 
@@ -811,6 +821,30 @@ class TelegramBot:
         )
 
     @restricted
+    async def _dashboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/dashboard — رابط لوحة التحكم (محلياً أو على Vercel)."""
+        dash = getattr(self.trader, "dashboard", None)
+        lines = []
+        if dash is not None:
+            lines.append("🖥 <b>لوحة التحكم المحلية</b>:")
+            lines.append("<code>" + fmt.esc(dash.url) + "</code>")
+            lines.append("افتحها من متصفح على نفس الجهاز.")
+        else:
+            lines.append(
+                "⚠️ اللوحة المحلية مُعطّلة. فعّلها بـ "
+                "<code>/set webenable true</code> ثم أعد تشغيل البوت."
+            )
+        if bool(self.cfg.get("supabase.enabled", False)):
+            lines.append(
+                "☁️ الرفع إلى Supabase <b>مُفعّل</b> — افتح لوحة Vercel من أي مكان."
+            )
+        else:
+            lines.append(
+                "☁️ للوصول من هاتفك: فعّل <code>supabase.enabled</code> في config.toml."
+            )
+        await self._reply(update, "\n\n".join(lines))
+
+    @restricted
     async def _settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._reply(update, fmt.settings_text(self.cfg))
 
@@ -1040,6 +1074,7 @@ class TelegramBot:
             "positions": self._positions,
             "pnl": self._pnl,
             "stats": self._stats,
+            "dashboard": self._dashboard,
             "scan": self._scan,
             "scanall": self._scan_all,
             "settings": self._settings,

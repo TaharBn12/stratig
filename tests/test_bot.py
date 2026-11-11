@@ -483,3 +483,52 @@ def test_wrong_timeframe_never_breaks_the_bot(tmp_path):
     bot.cfg.set("strategy.timeframe", "zzz")
     assert bot.cfg.effective_timeframe() == "15m"
     assert is_supported_timeframe(bot.cfg.effective_timeframe())
+
+
+# ═══════════════════════ لوحة التحكم ═══════════════════════
+def _dashboard_text(bot, mutate=None):
+    """ينفّذ أمر /dashboard ويرجّع النص الذي أُرسل."""
+    if mutate:
+        mutate(bot)
+
+    sent: list[str] = []
+
+    class FakeMsg:
+        async def edit_text(self, text, **kwargs):
+            sent.append(text)
+
+    class Update:
+        class effective_message:
+            @staticmethod
+            async def reply_text(text, **kwargs):
+                sent.append(text)
+                return FakeMsg()
+
+    asyncio.run(bot._dashboard.__wrapped__(bot, Update(), None))
+    return sent[0] if sent else ""
+
+
+def test_dashboard_command_shows_local_url_when_running():
+    bot, trader, _ex = make_bot()
+
+    class FakeDash:
+        url = "http://127.0.0.1:8000/"
+
+    trader.dashboard = FakeDash()
+    text = _dashboard_text(bot)
+    assert "127.0.0.1:8000" in text
+    assert "لوحة التحكم" in text
+
+
+def test_dashboard_command_explains_how_to_enable():
+    bot, trader, _ex = make_bot()
+    trader.dashboard = None
+    text = _dashboard_text(bot)
+    assert "webenable" in text
+    assert "معطّلة" in text or "مُعطّلة" in text
+
+
+def test_dashboard_mentions_supabase_state():
+    bot, _trader, _ex = make_bot(supabase__enabled=True)
+    text = _dashboard_text(bot)
+    assert "Supabase" in text and "مُفعّل" in text
