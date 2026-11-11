@@ -89,8 +89,28 @@ class EdgeStats:
                 f"بين {self.lower_r:+.3f}R و {self.upper_r:+.3f}R")
 
 
-def measure(values: Iterable[float], min_trades: int = 30) -> EdgeStats:
-    """يقيس ميزة عيّنة من العوائد بوحدة R."""
+def bonferroni_z(tests: int, conf: float = 0.95) -> float:
+    """قيمة z بعد تصحيح بونفيروني — **ضروري** عند اختبار أنماط متعدّدة.
+
+    اختبار 8 أنماط شموع بمستوى 95% يعطي احتمالاً ≈ 34% أن يظهر أحدها
+    «مهماً» بالمصادفة البحتة (1 − 0.95⁸). التصحيح يقسّم الخطأ على عدد
+    الاختبارات فيرفع العتبة: 8 اختبارات ⇒ z يتحوّل من 1.96 إلى ≈ 2.73.
+
+    بلا هذا التصحيح، كل «دراسة أنماط» هي مطاردة ضجيج.
+    """
+    from statistics import NormalDist
+
+    tests = max(1, int(tests))
+    alpha = (1.0 - conf) / tests
+    return NormalDist().inv_cdf(1.0 - alpha / 2.0)
+
+
+def measure(values: Iterable[float], min_trades: int = 30,
+            z: float = Z95) -> EdgeStats:
+    """يقيس ميزة عيّنة من العوائد بوحدة R.
+
+    `z` يسمح برفع العتبة عند تعدّد الاختبارات (راجع `bonferroni_z`).
+    """
     samples = [float(v) for v in values if v == v]      # استبعاد NaN
     count = len(samples)
     if not count:
@@ -99,8 +119,8 @@ def measure(values: Iterable[float], min_trades: int = 30) -> EdgeStats:
     mean = statistics.fmean(samples)
     stdev = statistics.stdev(samples) if count > 1 else 0.0
     stderr = stdev / math.sqrt(count) if count else 0.0
-    lower = mean - Z95 * stderr
-    upper = mean + Z95 * stderr
+    lower = mean - z * stderr
+    upper = mean + z * stderr
 
     if count < min_trades:
         verdict = VERDICT_UNKNOWN
@@ -125,16 +145,18 @@ def measure(values: Iterable[float], min_trades: int = 30) -> EdgeStats:
     )
 
 
-def measure_trades(trades: Iterable, min_trades: int = 30) -> EdgeStats:
+def measure_trades(trades: Iterable, min_trades: int = 30,
+                   z: float = Z95) -> EdgeStats:
     """يقيس ميزة كائنات Trade (تُقرأ منها r_multiple)."""
     return measure([float(getattr(t, "r_multiple", 0.0) or 0.0) for t in trades],
-                   min_trades=min_trades)
+                   min_trades=min_trades, z=z)
 
 
-def by_strategy(trades: Iterable, min_trades: int = 30) -> dict[str, EdgeStats]:
+def by_strategy(trades: Iterable, min_trades: int = 30,
+                z: float = Z95) -> dict[str, EdgeStats]:
     """يقيس الميزة لكل استراتيجية على حدة — قد تكون إحداهما رابحة والأخرى لا."""
     groups: dict[str, list[float]] = {}
     for trade in trades:
         key = str(getattr(trade, "strategy", "") or "غير محدّد")
         groups.setdefault(key, []).append(float(getattr(trade, "r_multiple", 0.0) or 0.0))
-    return {key: measure(values, min_trades) for key, values in groups.items()}
+    return {key: measure(values, min_trades, z) for key, values in groups.items()}
