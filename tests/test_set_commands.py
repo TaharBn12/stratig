@@ -94,8 +94,9 @@ def test_docs_cover_every_command():
     assert not missing, f"أوامر غير موثّقة: {sorted(missing)}"
 
 
-# صفوف الجدول المُولَّد فقط: | `/set key` | `path` | … — لا أمثلة النصّ
-_DOC_ROW = re.compile(r"^\| `/set ([a-z_]+)` \| `[a-z0-9_.]+` \|")
+# صفوف الجدول المُولَّد فقط: | المجموعة | `/set key` | `path` | … — لا أمثلة النصّ
+# (عمود المجموعة يسبق الأمر، لذا لا نثبّت بداية السطر على `/set`)
+_DOC_ROW = re.compile(r"^\| [^|]+ \| `/set ([a-z_]+)` \| `[a-z0-9_.]+` \|")
 
 
 def test_docs_command_count_matches_code():

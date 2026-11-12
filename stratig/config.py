@@ -55,6 +55,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mtf_ema_period": 50,
         "volatility_min_pct": 0.0,     # استبعد الساكن (0 = معطّل)
         "volatility_max_pct": 0.0,     # استبعد الهائج (0 = معطّل)
+        # المبدّل الجاهز: off | calm | volatile | band
+        # (العتبتان أعلاه تُشتقّان منه بـ /set volmode)
+        "volatility_mode": "off",
         # فلتر الاتجاه (اختياري، مُعطّل افتراضياً حتى تبقى الاستراتيجيات حرفية)
         # "off" = كماهي · "ema" = ارفض الإشارات المعاكسة للاتجاه العام
         "trend_filter": "off",

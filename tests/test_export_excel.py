@@ -141,6 +141,18 @@ def test_every_check_key_is_an_exported_command():
 
 # ── صلاحية الملف لأدوات الخارج ──
 
+def test_markdown_docs_are_up_to_date():
+    """docs/set-commands.md مُولَّد — إن تَقادم فشل الاختبار (كحال Excel)."""
+    from scripts.export_set_docs import render
+
+    fresh = render()
+    committed = (PROJECT_ROOT / "docs" / "set-commands.md").read_text(encoding="utf-8")
+    # السطر الأخير فيه طابع زمني — نقارن المحتوى بدونه
+    strip = lambda text: [ln for ln in text.splitlines() if not ln.startswith("<!--")]
+    assert strip(fresh) == strip(committed), (
+        "docs/set-commands.md قديم — أعد تشغيل python scripts/export_set_docs.py")
+
+
 def test_opens_with_openpyxl(exported):
     """مقياس النجاح الحقيقي: أن يفتحه Excel فعلاً، لا أن يكون ZIP صالحاً."""
     openpyxl = pytest.importorskip("openpyxl")

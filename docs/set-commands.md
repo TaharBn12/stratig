@@ -1,8 +1,11 @@
 # ⚙️ شرح كل أوامر `/set`
 
-**70 أمراً**، مستخرجة تلقائياً من خريطة الإعدادات في الكود
+**71 أمراً**، مستخرجة تلقائياً من خريطة الإعدادات في الكود
 (`SET_KEYS` في `stratig/bot/telegram_bot.py`) مع **القيم الافتراضية
 الحقيقية** من `DEFAULT_CONFIG` — لا من التوثيق المكتوب يدوياً.
+
+> 🔄 هذا الملف **مُولَّد** بـ `python scripts/export_set_docs.py`.
+> عدّل الكود لا هذا الملف، ثم أعد التوليد (والاختبارات تُلزمك بذلك).
 
 ---
 
@@ -28,117 +31,211 @@
 > كل تعديل **يُحفظ فوراً في `config.toml`** ويُطبَّق بلا إعادة تشغيل
 > (باستثناء ما يذكر خلاف ذلك). و`/set` يعرض لك القيمة القديمة والجديدة.
 
-### 💰 الصفقة والمخارج
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set tp` | `trade.take_profit_pct` | رقم عشري (أو `2%`) | `0.012` | جني الأرباح — مثال: 0.02 أو 2% |
-| `/set sl` | `trade.stop_loss_pct` | رقم عشري (أو `2%`) | `0.009` | وقف الخسارة — مثال: 0.01 أو 1% |
-| `/set qty` | `trade.qty_usdt` | رقم عشري (أو `2%`) | `50` | حجم الصفقة بالـ USDT — مثال: 50 |
-| `/set lev` | `trade.leverage` | رقم صحيح | `10` | الرافعة المالية — مثال: 10 |
-| `/set margin` | `trade.margin_mode` | `isolated` · `cross` | `isolated` | نوع الهامش |
-| `/set exit` | `exit.mode` | `percent` · `atr` | `percent` | مخارج الصفقة: نسب ثابتة أم ATR |
-| `/set follow_exit` | `exit.follow_strategy` | `true` / `false` | `true` | الصرامة: مخارج الاستراتيجية تطغى على exit.mode (true / false) |
-| `/set strict` | `exit.strict` | `true` / `false` | `true` | الصرامة: ارفض فتح صفقة بمخارج لا تنتمي للاستراتيجية (true / false) |
-| `/set drift` | `execution.max_entry_drift` | رقم عشري (أو `2%`) | `1.0` | أقصى انحراف مسموح عن سعر الإشارة كنسبة من الوقف (1.0 = وقف كامل) |
-| `/set block_stale` | `execution.block_stale_entry` | `true` / `false` | `false` | ارفض الدخول المتأخّر بدل التحذير فقط (true / false) |
-| `/set mode` | `execution.mode` | `manual` · `auto` | `manual` | وضع التنفيذ |
-| `/set dryrun` | `safety.dry_run` | `true` / `false` | `false` | المحاكاة (لا تُرسل أوامر حقيقية) |
+## 📋 الأوامر (حسب المجموعة)
 
-### 🧠 الاستراتيجية
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set strategy` | `strategy.name` | `rsi_williams` · `scalping_i` | `rsi_williams` | الاستراتيجية المستخدمة |
-| `/set tf` | `strategy.timeframe` | نص | `15m` | الإطار الزمني — مثال: 15m أو 1h |
-| `/set both` | `strategy.require_both` | `true` / `false` | `true` | التأكيد المزدوج (RSI + Williams %R) |
-| `/set candles` | `strategy.candles` | رقم صحيح | `500` | عدد الشموع المجلوبة لكل رمز — مثال: 500 |
-| `/set quality` | `strategy.quality_enabled` | `true` / `false` | `false` | فلاتر الجودة: نظام السوق + MTF + تقلّب |
-| `/set regime` | `strategy.regime` | `off` · `trend` · `range` | `off` | نظام السوق المسموح: off = الكل · trend = اتجاهي فقط · range = جانبي فقط |
-| `/set adxlen` | `strategy.adx_length` | رقم صحيح | `14` | فترة ADX — مثال: 14 |
-| `/set adxmin` | `strategy.adx_trend_min` | رقم عشري (أو `2%`) | `25.0` | أدنى ADX لاعتبار السوق متّجهاً — 25 |
-| `/set adxmax` | `strategy.adx_range_max` | رقم عشري (أو `2%`) | `20.0` | أقصى ADX لاعتبار السوق جانبياً — 20 |
-| `/set mtf` | `strategy.mtf_enabled` | `true` / `false` | `false` | تأكيد الإطار الأعلى قبل الدخول |
-| `/set mtftf` | `strategy.mtf_timeframe` | نص | `1h` | الإطار الأعلى للتأكيد — مثال: 1h |
-| `/set mtfema` | `strategy.mtf_ema_period` | رقم صحيح | `50` | فترة متوسط الإطار الأعلى — 50 |
-| `/set volmin` | `strategy.volatility_min_pct` | رقم عشري (أو `2%`) | `0.0` | أدنى تقلّب مسموح (ATR%) — مثال: 0.003 |
-| `/set volmax` | `strategy.volatility_max_pct` | رقم عشري (أو `2%`) | `0.0` | أقصى تقلّب مسموح (ATR%) — مثال: 0.02 |
-| `/set trend` | `strategy.trend_filter` | `off` · `ema` | `off` | فلتر الاتجاه: off = حرفي · ema = ارفض الإشارات عكس الاتجاه العام |
-| `/set trendperiod` | `strategy.trend_period` | رقم صحيح | `200` | فترة EMA لفلتر الاتجاه — مثال: 200 |
+### الصفقة والمخارج
 
-### ⚙️ معاملات scalping_i
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| الصفقة والمخارج | `/set tp` | `trade.take_profit_pct` | رقم عشري | جني الأرباح بين 0 و 1 (مثال 0.02) | 0.012 | جني الأرباح — مثال: 0.02 أو 2% |
+| الصفقة والمخارج | `/set sl` | `trade.stop_loss_pct` | رقم عشري | وقف الخسارة بين 0 و 1 (مثال 0.01) | 0.009 | وقف الخسارة — مثال: 0.01 أو 1% |
+| الصفقة والمخارج | `/set qty` | `trade.qty_usdt` | رقم عشري | حجم الصفقة يجب أن يكون أكبر من صفر | 50 | حجم الصفقة بالـ USDT — مثال: 50 |
+| الصفقة والمخارج | `/set lev` | `trade.leverage` | رقم صحيح | الرافعة بين 1 و 125 | 10 | الرافعة المالية — مثال: 10 |
+| الصفقة والمخارج | `/set margin` | `trade.margin_mode` | خيارات | isolated · cross | isolated | نوع الهامش |
+| الصفقة والمخارج | `/set exit` | `exit.mode` | خيارات | percent · atr | percent | مخارج الصفقة: نسب ثابتة أم ATR |
+| الصفقة والمخارج | `/set follow_exit` | `exit.follow_strategy` | صح/خطأ | true · false | true | الصرامة: مخارج الاستراتيجية تطغى على exit.mode (true / false) |
+| الصفقة والمخارج | `/set strict` | `exit.strict` | صح/خطأ | true · false | true | الصرامة: ارفض فتح صفقة بمخارج لا تنتمي للاستراتيجية (true / false) |
+| الصفقة والمخارج | `/set drift` | `execution.max_entry_drift` | رقم عشري | رقم عشري | 1.0 | أقصى انحراف مسموح عن سعر الإشارة كنسبة من الوقف (1.0 = وقف كامل) |
+| الصفقة والمخارج | `/set block_stale` | `execution.block_stale_entry` | صح/خطأ | true · false | false | ارفض الدخول المتأخّر بدل التحذير فقط (true / false) |
+| الصفقة والمخارج | `/set mode` | `execution.mode` | خيارات | manual · auto | manual | وضع التنفيذ |
+| الصفقة والمخارج | `/set dryrun` | `safety.dry_run` | صح/خطأ | true · false | false | المحاكاة (لا تُرسل أوامر حقيقية) |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set sifast` | `strategy.scalping_i.ema_fast` | رقم صحيح | `30` | scalping_i: EMA سريع — 30 |
-| `/set sislow` | `strategy.scalping_i.ema_slow` | رقم صحيح | `50` | scalping_i: EMA بطيء — 50 |
-| `/set sirsilen` | `strategy.scalping_i.rsi_length` | رقم صحيح | `10` | scalping_i: فترة RSI — 10 |
-| `/set sibb` | `strategy.scalping_i.bb_length` | رقم صحيح | `15` | scalping_i: فترة بولينجر — 15 |
-| `/set sibbstd` | `strategy.scalping_i.bb_std` | رقم عشري (أو `2%`) | `1.5` | scalping_i: انحراف بولينجر — 1.5 |
-| `/set siatr` | `strategy.scalping_i.atr_length` | رقم صحيح | `7` | scalping_i: فترة ATR — 7 |
-| `/set sibc` | `strategy.scalping_i.backcandles` | رقم صحيح | `7` | scalping_i: شموع النظر للخلف — 7 |
-| `/set sisl` | `strategy.scalping_i.sl_coef` | رقم عشري (أو `2%`) | `1.1` | scalping_i: معامل الوقف — 1.1 |
-| `/set sitp` | `strategy.scalping_i.tp_sl_ratio` | رقم عشري (أو `2%`) | `1.5` | scalping_i: نسبة الهدف للوقف — 1.5 |
+### الاستراتيجية
 
-### ⚙️ معاملات rsi_williams
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| الاستراتيجية | `/set strategy` | `strategy.name` | خيارات | rsi_williams · scalping_i | rsi_williams | الاستراتيجية المستخدمة |
+| الاستراتيجية | `/set tf` | `strategy.timeframe` | نص | نص | 15m | الإطار الزمني — مثال: 15m أو 1h |
+| الاستراتيجية | `/set both` | `strategy.require_both` | صح/خطأ | true · false | true | التأكيد المزدوج (RSI + Williams %R) |
+| الاستراتيجية | `/set candles` | `strategy.candles` | رقم صحيح | عدد الشموع بين 50 و 5000 | 500 | عدد الشموع المجلوبة لكل رمز — مثال: 500 |
+| الاستراتيجية | `/set quality` | `strategy.quality_enabled` | صح/خطأ | true · false | false | فلاتر الجودة: نظام السوق + MTF + تقلّب |
+| الاستراتيجية | `/set volmode` | `strategy.volatility_mode` | خيارات | off · calm · volatile · band | off | المبدّل: off = الكل · calm = الهادئ فقط · volatile = المتقلّب فقط · band = المعتدل بينهما |
+| الاستراتيجية | `/set volmin` | `strategy.volatility_min_pct` | رقم عشري | رقم عشري | 0.0 | أدنى تقلّب مسموح (ATR%) — مثال: 0.003 |
+| الاستراتيجية | `/set volmax` | `strategy.volatility_max_pct` | رقم عشري | رقم عشري | 0.0 | أقصى تقلّب مسموح (ATR%) — مثال: 0.02 |
+| الاستراتيجية | `/set regime` | `strategy.regime` | خيارات | off · trend · range | off | نظام السوق المسموح: off = الكل · trend = اتجاهي فقط · range = جانبي فقط |
+| الاستراتيجية | `/set adxlen` | `strategy.adx_length` | رقم صحيح | رقم صحيح | 14 | فترة ADX — مثال: 14 |
+| الاستراتيجية | `/set adxmin` | `strategy.adx_trend_min` | رقم عشري | رقم عشري | 25.0 | أدنى ADX لاعتبار السوق متّجهاً — 25 |
+| الاستراتيجية | `/set adxmax` | `strategy.adx_range_max` | رقم عشري | رقم عشري | 20.0 | أقصى ADX لاعتبار السوق جانبياً — 20 |
+| الاستراتيجية | `/set mtf` | `strategy.mtf_enabled` | صح/خطأ | true · false | false | تأكيد الإطار الأعلى قبل الدخول |
+| الاستراتيجية | `/set mtftf` | `strategy.mtf_timeframe` | نص | نص | 1h | الإطار الأعلى للتأكيد — مثال: 1h |
+| الاستراتيجية | `/set mtfema` | `strategy.mtf_ema_period` | رقم صحيح | رقم صحيح | 50 | فترة متوسط الإطار الأعلى — 50 |
+| الاستراتيجية | `/set trend` | `strategy.trend_filter` | خيارات | off · ema | off | فلتر الاتجاه: off = حرفي · ema = ارفض الإشارات عكس الاتجاه العام |
+| الاستراتيجية | `/set trendperiod` | `strategy.trend_period` | رقم صحيح | رقم صحيح | 200 | فترة EMA لفلتر الاتجاه — مثال: 200 |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set rsiper` | `strategy.rsi.period` | رقم صحيح | `14` | rsi_williams: فترة RSI — 14 |
-| `/set rsios` | `strategy.rsi.oversold` | رقم عشري (أو `2%`) | `30` | rsi_williams: تشبّع بيعي — 30 |
-| `/set rsiob` | `strategy.rsi.overbought` | رقم عشري (أو `2%`) | `70` | rsi_williams: تشبّع شرائي — 70 |
-| `/set rsilook` | `strategy.rsi.lookback` | رقم صحيح | `3` | rsi_williams: شموع النظر للخلف — 3 |
-| `/set wper` | `strategy.williams_r.lbp` | رقم صحيح | `24` | rsi_williams: فترة وليامز — 24 |
-| `/set wos` | `strategy.williams_r.oversold` | رقم عشري (أو `2%`) | `-75` | rsi_williams: وليامز تشبّع بيعي — -75 |
-| `/set wob` | `strategy.williams_r.overbought` | رقم عشري (أو `2%`) | `-25` | rsi_williams: وليامز تشبّع شرائي — -25 |
-| `/set wema` | `strategy.williams_r.ema_window` | رقم صحيح | `24` | rsi_williams: نافذة تنعيم وليامز — 24 |
+### معاملات scalping_i
 
-### 🔎 الفحص (الماسح)
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| معاملات scalping_i | `/set sifast` | `strategy.scalping_i.ema_fast` | رقم صحيح | رقم صحيح | 30 | scalping_i: EMA سريع — 30 |
+| معاملات scalping_i | `/set sislow` | `strategy.scalping_i.ema_slow` | رقم صحيح | رقم صحيح | 50 | scalping_i: EMA بطيء — 50 |
+| معاملات scalping_i | `/set sirsilen` | `strategy.scalping_i.rsi_length` | رقم صحيح | رقم صحيح | 10 | scalping_i: فترة RSI — 10 |
+| معاملات scalping_i | `/set sibb` | `strategy.scalping_i.bb_length` | رقم صحيح | رقم صحيح | 15 | scalping_i: فترة بولينجر — 15 |
+| معاملات scalping_i | `/set sibbstd` | `strategy.scalping_i.bb_std` | رقم عشري | رقم عشري | 1.5 | scalping_i: انحراف بولينجر — 1.5 |
+| معاملات scalping_i | `/set siatr` | `strategy.scalping_i.atr_length` | رقم صحيح | رقم صحيح | 7 | scalping_i: فترة ATR — 7 |
+| معاملات scalping_i | `/set sibc` | `strategy.scalping_i.backcandles` | رقم صحيح | رقم صحيح | 7 | scalping_i: شموع النظر للخلف — 7 |
+| معاملات scalping_i | `/set sisl` | `strategy.scalping_i.sl_coef` | رقم عشري | رقم عشري | 1.1 | scalping_i: معامل الوقف — 1.1 |
+| معاملات scalping_i | `/set sitp` | `strategy.scalping_i.tp_sl_ratio` | رقم عشري | رقم عشري | 1.5 | scalping_i: نسبة الهدف للوقف — 1.5 |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set interval` | `scanner.interval_seconds` | رقم صحيح | `120` | مدة الفحص بالثواني — مثال: 120 |
-| `/set ttl` | `scanner.signal_ttl_seconds` | رقم صحيح | `900` | مدة صلاحية الإشارة بالثواني — مثال: 900 |
-| `/set cooldown` | `scanner.cooldown_seconds` | رقم صحيح | `1800` | فترة السمومية لكل رمز بالثواني — مثال: 1800 |
-| `/set topn` | `scanner.top_n` | رقم صحيح | `40` | عدد الرموز المفحوصة — 0 = كل العملات |
-| `/set maxsig` | `scanner.max_signals_per_scan` | رقم صحيح | `5` | أقصى إشارات في الفحص الواحد — مثال: 5 |
+### معاملات rsi_williams
 
-### 🛡 إدارة المخاطرة
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| معاملات rsi_williams | `/set rsiper` | `strategy.rsi.period` | رقم صحيح | رقم صحيح | 14 | rsi_williams: فترة RSI — 14 |
+| معاملات rsi_williams | `/set rsios` | `strategy.rsi.oversold` | رقم عشري | رقم عشري | 30 | rsi_williams: تشبّع بيعي — 30 |
+| معاملات rsi_williams | `/set rsiob` | `strategy.rsi.overbought` | رقم عشري | رقم عشري | 70 | rsi_williams: تشبّع شرائي — 70 |
+| معاملات rsi_williams | `/set rsilook` | `strategy.rsi.lookback` | رقم صحيح | رقم صحيح | 3 | rsi_williams: شموع النظر للخلف — 3 |
+| معاملات rsi_williams | `/set wper` | `strategy.williams_r.lbp` | رقم صحيح | رقم صحيح | 24 | rsi_williams: فترة وليامز — 24 |
+| معاملات rsi_williams | `/set wos` | `strategy.williams_r.oversold` | رقم عشري | رقم عشري | -75 | rsi_williams: وليامز تشبّع بيعي — -75 |
+| معاملات rsi_williams | `/set wob` | `strategy.williams_r.overbought` | رقم عشري | رقم عشري | -25 | rsi_williams: وليامز تشبّع شرائي — -25 |
+| معاملات rsi_williams | `/set wema` | `strategy.williams_r.ema_window` | رقم صحيح | رقم صحيح | 24 | rsi_williams: نافذة تنعيم وليامز — 24 |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set maxpos` | `risk.max_positions` | رقم صحيح | `5` | أقصى عدد صفقات مفتوحة — مثال: 5 |
-| `/set minnotional` | `risk.min_notional` | رقم عشري (أو `2%`) | `20` | أدنى قيمة للصفقة بالـ USDT — مثال: 20 |
-| `/set sizing` | `risk.sizing` | `fixed` · `risk` | `fixed` | حجم الصفقة: fixed = ثابت · risk = خسارة ثابتة = نسبة من الرصيد |
-| `/set riskpct` | `risk.risk_per_trade_pct` | رقم عشري (أو `2%`) | `0.01` | نسبة المخاطرة من الرصيد لكل صفقة — مثال: 0.01 (1%) |
-| `/set maxqty` | `risk.max_qty_usdt` | رقم عشري (أو `2%`) | `0` | أقصى قيمة للصفقة بالـ USDT (0 = بلا حد) |
-| `/set maxtrades` | `risk.max_trades_per_hour` | رقم صحيح | `0` | أقصى صفقات في الساعة (0 = بلا حد) |
-| `/set mingap` | `risk.min_gap_seconds` | رقم صحيح | `0` | فاصل إلزامي بين صفقتين بالثواني |
-| `/set maxlosses` | `risk.max_consecutive_losses` | رقم صحيح | `0` | قاطع: أوقف التداول بعد كم خسارة متتالية (0 = معطّل) |
-| `/set pauseloss` | `risk.pause_after_losses_seconds` | رقم صحيح | `3600` | مدة الإيقاف بالثواني بعد القاطع |
+### الفحص (الماسح)
 
-### 📊 مقياس الميزة (Edge)
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| الفحص (الماسح) | `/set interval` | `scanner.interval_seconds` | رقم صحيح | مدة الفحص 30 ثانية على الأقل | 120 | مدة الفحص بالثواني — مثال: 120 |
+| الفحص (الماسح) | `/set ttl` | `scanner.signal_ttl_seconds` | رقم صحيح | مدة الإشارة 60 ثانية على الأقل | 900 | مدة صلاحية الإشارة بالثواني — مثال: 900 |
+| الفحص (الماسح) | `/set cooldown` | `scanner.cooldown_seconds` | رقم صحيح | قيمة غير صالحة | 1800 | فترة السمومية لكل رمز بالثواني — مثال: 1800 |
+| الفحص (الماسح) | `/set topn` | `scanner.top_n` | رقم صحيح | عدد الرموز بين 0 و 2000 (0 = الكل) | 40 | عدد الرموز المفحوصة — 0 = كل العملات |
+| الفحص (الماسح) | `/set maxsig` | `scanner.max_signals_per_scan` | رقم صحيح | أقصى إشارات بين 1 و 50 | 5 | أقصى إشارات في الفحص الواحد — مثال: 5 |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set edge` | `edge.enabled` | `true` / `false` | `true` | مقياس الميزة في /edge |
-| `/set edgegate` | `edge.gate` | `true` / `false` | `false` | منع التداول عند ثبوت الخسارة إحصائياً |
-| `/set edgemin` | `edge.min_trades` | رقم صحيح | `30` | أدنى صفقات قبل إصدار حكم — 30 |
-| `/set edgelook` | `edge.lookback` | رقم صحيح | `0` | 0 = كل الصفقات، وإلا آخر N صفقة |
+### إدارة المخاطرة
 
-### 🌐 اللوحة و Supabase
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| إدارة المخاطرة | `/set maxpos` | `risk.max_positions` | رقم صحيح | أقصى صفقات بين 1 و 50 | 5 | أقصى عدد صفقات مفتوحة — مثال: 5 |
+| إدارة المخاطرة | `/set minnotional` | `risk.min_notional` | رقم عشري | رقم عشري | 20 | أدنى قيمة للصفقة بالـ USDT — مثال: 20 |
+| إدارة المخاطرة | `/set sizing` | `risk.sizing` | خيارات | fixed · risk | fixed | حجم الصفقة: fixed = ثابت · risk = خسارة ثابتة = نسبة من الرصيد |
+| إدارة المخاطرة | `/set riskpct` | `risk.risk_per_trade_pct` | رقم عشري | رقم عشري | 0.01 | نسبة المخاطرة من الرصيد لكل صفقة — مثال: 0.01 (1%) |
+| إدارة المخاطرة | `/set maxqty` | `risk.max_qty_usdt` | رقم عشري | رقم عشري | 0 | أقصى قيمة للصفقة بالـ USDT (0 = بلا حد) |
+| إدارة المخاطرة | `/set maxtrades` | `risk.max_trades_per_hour` | رقم صحيح | رقم صحيح | 0 | أقصى صفقات في الساعة (0 = بلا حد) |
+| إدارة المخاطرة | `/set mingap` | `risk.min_gap_seconds` | رقم صحيح | رقم صحيح | 0 | فاصل إلزامي بين صفقتين بالثواني |
+| إدارة المخاطرة | `/set maxlosses` | `risk.max_consecutive_losses` | رقم صحيح | رقم صحيح | 0 | قاطع: أوقف التداول بعد كم خسارة متتالية (0 = معطّل) |
+| إدارة المخاطرة | `/set pauseloss` | `risk.pause_after_losses_seconds` | رقم صحيح | رقم صحيح | 3600 | مدة الإيقاف بالثواني بعد القاطع |
 
-| الأمر | الإعداد | القيم المقبولة | الافتراضي | الشرح |
-|---|---|---|---|---|
-| `/set webenable` | `web.enabled` | `true` / `false` | `false` | لوحة التحكم على جهازك |
-| `/set webport` | `web.port` | رقم صحيح | `8000` | منفذ لوحة التحكم — مثال: 8000 |
-| `/set webtoken` | `web.token` | نص | *(فارغ)* | رمز حماية اللوحة (فارغ = بلا حماية) |
-| `/set supabase` | `supabase.enabled` | `true` / `false` | `false` | رفع البيانات إلى Supabase |
-| `/set supabaseurl` | `supabase.url` | نص | *(فارغ)* | رابط مشروع Supabase |
-| `/set supabasekey` | `supabase.key` | نص | *(فارغ)* | المفتاح السرّي لـ Supabase |
-| `/set botid` | `supabase.bot_id` | نص | `default` | معرّف البوت في Supabase |
+### مقياس الميزة (Edge)
 
-<!-- العدد الكلي: 70 -->
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| مقياس الميزة (Edge) | `/set edge` | `edge.enabled` | صح/خطأ | true · false | true | مقياس الميزة في /edge |
+| مقياس الميزة (Edge) | `/set edgegate` | `edge.gate` | صح/خطأ | true · false | false | منع التداول عند ثبوت الخسارة إحصائياً |
+| مقياس الميزة (Edge) | `/set edgemin` | `edge.min_trades` | رقم صحيح | رقم صحيح | 30 | أدنى صفقات قبل إصدار حكم — 30 |
+| مقياس الميزة (Edge) | `/set edgelook` | `edge.lookback` | رقم صحيح | رقم صحيح | 0 | 0 = كل الصفقات، وإلا آخر N صفقة |
+
+### اللوحة و Supabase
+
+| المجموعة | الأمر | الإعداد (config.toml) | النوع | القيم المقبولة | الافتراضي | الشرح |
+|---|---|---|---|---|---|---|
+| اللوحة و Supabase | `/set webenable` | `web.enabled` | صح/خطأ | true · false | false | لوحة التحكم على جهازك |
+| اللوحة و Supabase | `/set webport` | `web.port` | رقم صحيح | رقم صحيح | 8000 | منفذ لوحة التحكم — مثال: 8000 |
+| اللوحة و Supabase | `/set webtoken` | `web.token` | نص | نص | (فارغ) | رمز حماية اللوحة (فارغ = بلا حماية) |
+| اللوحة و Supabase | `/set supabase` | `supabase.enabled` | صح/خطأ | true · false | false | رفع البيانات إلى Supabase |
+| اللوحة و Supabase | `/set supabaseurl` | `supabase.url` | نص | نص | (فارغ) | رابط مشروع Supabase |
+| اللوحة و Supabase | `/set supabasekey` | `supabase.key` | نص | نص | (فارغ) | المفتاح السرّي لـ Supabase |
+| اللوحة و Supabase | `/set botid` | `supabase.bot_id` | نص | نص | default | معرّف البوت في Supabase |
+
+---
+
+## 🌊 مبدّل التقلّب — `/set volmode`
+
+**هذا هو الأمر الذي يبدّل بين تتبع السوق المتقلّب بقوة والهادئ.**
+
+```text
+/set volmode calm        ← تتبّع السوق الهادئ فقط
+/set volmode volatile    ← تتبّع السوق المتقلّب فقط
+/set volmode band        ← النطاق المعتدل بينهما
+/set volmode off         ← بلا فلتر (يتداول في كل الأحوال)
+```
+
+يضبط `volmin` و `volmax` **معاً** بعتبات محسوبة، و**يفعّل `quality`
+تلقائياً** — لأن بدونه تُتجاهل العتبتان بصمت (وهو الفخّ الأخطر في البوت).
+
+### لماذا عتبة نسبية لا رقم ثابت
+
+قسنا التقلّب (**ATR%** بطريقة وايلدر 14 — نفس الدالّة التي يستخدمها الفلتر)
+على **5 عملات × 15m × 60 يوماً = 1,105 قياس**:
+
+| الإطار | p25 | p40 | p60 | p75 | الوسيط |
+|---|---|---|---|---|---|
+| 15m | 0.264% | 0.318% | 0.394% | 0.476% | 0.354% |
+| 1h | 0.590% | 0.689% | 0.823% | 0.949% | 0.751% |
+
+**وسيط التقلّب على 1h أكثر من ضعف وسيطه على 15m.** فعتبة واحدة ثابتة
+(مثل 0.5%) تعني شيئاً مختلفاً تماماً على الإطارين: على 15m تحجب أغلب
+السوق، وعلى 1h تحجب أقلّه. لذلك العتبات **تُقاس على إطارك**:
+
+- خط أساس مُقاس على 15m،
+- يُضرب في `√(دقائق الإطار ÷ 15)` — لأن التقلّب ينمو مع جذر الزمن،
+  وقد تحقّقنا منه: توقّع 0.708% لوسيط 1h مقابل **0.751% فعلي (خطأ 5.8%)**.
+
+**العتبات الناتجة:**
+
+| الإطار | calm (أقصى) | volatile (أدنى) | band (من ← إلى) |
+|---|---|---|---|
+| 5m | 0.184% | 0.228% | 0.152% ← 0.275% |
+| 15m | 0.318% | 0.394% | 0.264% ← 0.476% |
+| 30m | 0.450% | 0.557% | 0.373% ← 0.673% |
+| 1h | 0.636% | 0.788% | 0.528% ← 0.952% |
+| 4h | 1.272% | 1.576% | 1.056% ← 1.904% |
+
+> ⏱ **غيّرتَ الإطار؟** أعد `/set volmode ...` لتُحسب العتبات على الإطار
+> الجديد (القيم تُحفظ كأرقام، فلا تُحدَّث تلقائياً).
+
+
+---
+
+## 📖 الدليل السريع
+
+| القسم | البند | التفاصيل |
+|---|---|---|
+| طريقة الاستعمال | الأمر والقيمة معاً | /set tp 0.02 — الأسرع |
+| طريقة الاستعمال | ثم القيمة | /set tp  ثم أرسل 0.02 في رسالة تالية |
+| طريقة الاستعمال | قائمة الأزرار | /set  بلا قيمة ⇒ أزرار لكل الإعدادات |
+| قواعد القيم | صح/خطأ | true · false · 1 · 0 · yes · no · on · off · نعم · مفعّل |
+| قواعد القيم | رقم عشري | 0.012  أو  1.2% (النسبة تُحوَّل تلقائياً) |
+| قواعد القيم | خيارات | واحدة فقط من القيم المذكورة، وإلا رسالة توضّح المسموح |
+| قواعد القيم | الحفظ | كل تعديل يُحفظ فوراً في config.toml ويُطبَّق بلا إعادة تشغيل |
+| مبدّل التقلّب | /set volmode calm | السوق الهادئ فقط — يستبعد ما فوق عتبة |
+| مبدّل التقلّب | /set volmode volatile | السوق المتقلّب فقط — يستبعد ما دون عتبة |
+| مبدّل التقلّب | /set volmode band | النطاق المعتدل بين العتبتين |
+| مبدّل التقلّب | /set volmode off | بلا فلتر — يتداول في كل الأحوال |
+| مبدّل التقلّب | العتبات تُقاس على إطارك | غيّرت tf؟ أعد /set volmode لتُحسب العتبات على الإطار الجديد |
+| مبدّل التقلّب | quality يُفعَّل تلقائياً | بدونه تُتجاهل volmin/volmax كلها بصمت — فعّلناه عنك |
+| تحقّقات مدمجة | /set lev | 1 ← 125 |
+| تحقّقات مدمجة | /set tp  ·  /set sl | بين 0 و 1 (أو 2%) |
+| تحقّقات مدمجة | /set qty | أكبر من صفر |
+| تحقّقات مدمجة | /set interval | 30 ثانية على الأقل |
+| تحقّقات مدمجة | /set ttl | 60 ثانية على الأقل |
+| تحقّقات مدمجة | /set maxpos | 1 ← 50 |
+| تحقّقات مدمجة | /set topn | 0 ← 2000 (وصفر = كل العملات) |
+| تحقّقات مدمجة | /set maxsig | 1 ← 50 |
+| تحقّقات مدمجة | /set candles | 50 ← 5000 |
+| تحقّقات مدمجة | /set tf | يوَّحّد (5 و 5min و 5M ⇒ 5m) ويرفض غير المدعوم |
+| أثر فوري | /set interval | يُعيد جدولة الفحص فوراً |
+| أثر فوري | /set topn | يبطل قائمة الرموز المخزّنة فتُجلب من جديد |
+| أثر فوري | /set dryrun | يُطبَّق على كائن المنصة حالاً |
+| أثر فوري | /set strategy | يبدّل الاستراتيجية ويُصلح تعارض المخارج |
+| أثر فوري | /set exit · follow_exit · strict · candles | يعيد فحص صرامة المخارج ويُبلّغك بأي تعارض أُصلح |
+| أثر فوري | /set volmode | يضبط volmin و volmax معاً، ويفعّل quality |
+| أثر فوري | /set tf | يمسح «السمومية» عن كل الرموز (إلا لَمَا ظهرت إشارات الإطار الجديد قبل 30 دقيقة) |
+| أخطاء شائعة | «إطار زمني غير مدعوم» | اكتب 5m · 1h (يوَّحّد تلقائياً في الأغلب) |
+| أخطاء شائعة | «إعداد غير معروف» | الاسم خطأ — أرسل /set لترى القائمة |
+| أخطاء شائعة | غيّرت tp/sl ولم يتغيّر شيء | follow_exit = true افتراضياً ⇒ مخارج الاستراتيجية تطغى. اجعلها false إن أردت مخارجك |
+| أخطاء شائعة | فلتر التقلّب لا يعمل | quality = false ⇒ volmin/volmax/regime معطّلة. فعّل /set quality true (أو استخدم volmode) |
+| أخطاء شائعة | /set supabase on بلا أثر | اضبط supabaseurl و supabasekey أولاً |
+| أخطاء شائعة | البوت يرفض التداول الحقيقي | TESTNET=false بلا CONFIRM_LIVE_TRADING=1 — مقصود: حماية لا عطل |
 
 ---
 
@@ -163,21 +260,11 @@
 |---|---|
 | `/set interval` | يُعيد جدولة الفحص فوراً |
 | `/set topn` | يُبطل قائمة الرموز المخزّنة فتُجلب من جديد |
-| `/set dryrun` | يُطبَّق على كائن المنصة **حالاً** (وإلا بقيت الأوامر محاكاة حتى إعادة التشغيل) |
+| `/set dryrun` | يُطبَّق على كائن المنصة **حالاً** |
 | `/set strategy` | يبدّل الاستراتيجية ويُصلح تعارض المخارج |
+| `/set volmode` | يضبط `volmin` و `volmax` معاً، ويفعّل `quality` |
 | `/set exit` · `follow_exit` · `strict` · `candles` | يُعيد فحص **صرامة المخارج** ويُبلّغك بأي تعارض أُصلح |
 | `/set tf` | **يمسح «السمومية»** عن كل الرموز — لولاها لَمَا ظهرت إشارات الإطار الجديد قبل 30 دقيقة |
-
-## ⚠️ أخطاء شائعة
-
-| العَرَض | السبب | العلاج |
-|---|---|---|
-| «إطار زمني غير مدعوم» | كتبت `5min` أو `1H` | اكتب `5m` · `1h` (يُوَّحّد تلقائياً في الأغلب) |
-| «إعداد غير معروف» | اسم الأمر خطأ | أرسل `/set` لترى القائمة كاملة |
-| غيّرت `tp`/`sl` ولم يتغيّر شيء | `follow_exit = true` (**الافتراضي**) ⇒ مخارج الاستراتيجية تطغى | اجعلها `false` إن أردت مخارجك اليدوية |
-| `/set supabase on` بلا أثر | الرابط أو المفتاح فارغ | اضبط `supabaseurl` و `supabasekey` أولاً |
-| فلاتر الجودة لا تعمل | `quality = false` ⇒ **`regime`/`volmin`/`volmax` معطّلة** | `/set quality true` أولاً — **وهو الفخّ الأخطر** |
-| البوت يرفض التداول الحقيقي | `TESTNET=false` بلا `CONFIRM_LIVE_TRADING=1` | مقصود: حماية لا عطل |
 
 ## 🧭 أوامر أخرى غير `/set` (للسياق)
 
@@ -186,3 +273,6 @@
 
 > `/recommended` يضبط **الإعدادات المُوصى بها** دفعة واحدة بدل تعديل كل
 > أمر على حدة — أنصح به كنقطة بداية.
+
+
+<!-- مُولَّد آلياً · 71 أمراً · 2026-11-12 12:01 UTC -->
