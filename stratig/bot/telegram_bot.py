@@ -150,6 +150,9 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "mode": ("execution.mode", "choice:manual,auto", "وضع التنفيذ"),
     "dryrun": ("safety.dry_run", "bool", "المحاكاة (لا تُرسل أوامر حقيقية)"),
     "both": ("strategy.require_both", "bool", "التأكيد المزدوج (RSI + Williams %R)"),
+    # كان الكود يعالجه أدناه (في تحقّقات الصرامة) لكنه غائب من هذه الخريطة،
+    # فكان `/set candles` مرفوضاً كأنه غير موجود — أضفناه ليعمل فعلاً.
+    "candles": ("strategy.candles", "int", "عدد الشموع المجلوبة لكل رمز — مثال: 500"),
 }
 
 
@@ -1021,6 +1024,8 @@ class TelegramBot:
             "maxpos": lambda v: 1 <= int(v) <= 50 or "أقصى صفقات بين 1 و 50",
             "topn": lambda v: 0 <= int(v) <= 2000 or "عدد الرموز بين 0 و 2000 (0 = الكل)",
             "maxsig": lambda v: 1 <= int(v) <= 50 or "أقصى إشارات بين 1 و 50",
+            # أقل من 50 شمعة تكسر المؤشرات، وأكثر من 5000 يبطّئ الفحص بلا فائدة
+            "candles": lambda v: 50 <= int(v) <= 5000 or "عدد الشموع بين 50 و 5000",
         }
         if key in checks:
             result = checks[key](value)
