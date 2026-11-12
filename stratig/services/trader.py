@@ -39,6 +39,19 @@ from ..utils import esc as _esc, num as _num
 
 log = logging.getLogger(__name__)
 
+
+def _as_float(value, default: float = 0.0) -> float:
+    """يحاول تحويل أي قيمة إلى رقم — بلا استثناء.
+
+    تُستخدم حيث **تحرّك المال فعلاً** (مثل بعد إغلاق صفقة): فشل قراءة
+    الربح يجب ألا يُسقط تسجيل الصفقة كلها فتضيع من السجل والإحصائيات.
+    """
+    try:
+        return float(value)          # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 STATUS_PENDING = "pending"
 STATUS_OPENED = "opened"
 STATUS_SKIPPED = "skipped"
@@ -899,7 +912,9 @@ class Trader:
             return None
         self.stats["closed"] += 1
         pnl = await asyncio.to_thread(self.exchange.recent_pnl, 1)
-        self._record_close(symbol, float(pnl or 0.0), result)
+        # الصفقة أُغلقت فعلاً على المنصة هنا — فأي فشل في قراءة الربح يجب
+        # ألا يُسقط التسجيل كله (وإلا ضاعت الصفقة من السجل والإحصائيات).
+        self._record_close(symbol, _as_float(pnl), result)
         await self.notifier.send(
             f"🔒 <b>تم إغلاق الصفقة</b>\n"
             f"الرمز: <code>{_esc(symbol)}</code>\n"
