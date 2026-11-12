@@ -78,3 +78,25 @@ def normalize_timeframe(value, default: str = "15m") -> str:
 
 def is_supported_timeframe(value) -> bool:
     return normalize_timeframe(value, default="") in ALLOWED_TIMEFRAMES
+
+
+# بالدقائق: كم دقيقة في الإطار الواحد
+_TF_MINUTES: dict[str, int] = {
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
+    "1d": 1440, "3d": 4320, "1w": 10080, "1M": 43200,
+}
+
+
+def timeframe_minutes(value, default: int = 15) -> int:
+    """`1h` ⇒ 60 دقيقة. يُستخدم لقياس عتبات التقلّب بين الإطارات."""
+    normalized = normalize_timeframe(value, default="")
+    if not normalized:
+        return default
+    if normalized in _TF_MINUTES:
+        return _TF_MINUTES[normalized]
+    # صيغة رقمية عامة: 45m ⇒ 45
+    text = normalized.lower()
+    if text.endswith("m") and text[:-1].isdigit():
+        return int(text[:-1]) or default
+    return default

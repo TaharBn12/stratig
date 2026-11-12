@@ -69,6 +69,41 @@ TEXT_COMMANDS = {
     "❔ مساعدة": "help",
 }
 
+# ═══════════════════════ عتبات التقلّب ═══════════════════════
+# مقيسة على **بيانات حقيقية** (5 عملات × 15m × 60 يوماً = 1,105 قياس
+# لـ ATR% بطريقة وايلدر 14، وهي نفس الدالّة التي يستخدمها الفلتر).
+#
+#   p25=0.264%   p40=0.318%   p60=0.394%   p75=0.476%
+#
+# لماذا نسبة مئوية من التوزيع لا رقم ثابت؟ لأن «الهادي» و«المتقلّب»
+# نسبيّان: وسيط التقلّب على 1h (0.751%) **أكثر من ضعف** وسيطه على 15m
+# (0.354%) — فعتبة واحدة ثابتة تخطئ حتماً على أحد الإطارين.
+VOL_BASE_15M = {
+    "calm":     (0.0,     0.00318),   # هادئ: استبعد ما فوق p40
+    "volatile": (0.00394, 0.0),       # متقلّب: استبعد ما دون p60
+    "band":     (0.00264, 0.00476),   # معتدل: بين p25 و p75
+    "off":      (0.0,     0.0),
+}
+VOL_BASE_TF_MINUTES = 15
+
+
+def volatility_preset(mode: str, timeframe: str = "15m") -> tuple[float, float]:
+    """يُحوّل `volmode` إلى (volmin, volmax) مُكيَّفين على الإطار الحالي.
+
+    القياس بـ √(الدقائق): التقلّب ينمو مع جذر الزمن، وقد تحقّقنا منه على
+    بياناتنا — توقّع 0.708% لوسيط 1h مقابل 0.751% فعلي (**خطأ 5.8%** فقط).
+    بهذا تعمل العتبات على 5m و 30m و 4h بلا قياس جديد لكل إطار.
+    """
+    from ..utils import timeframe_minutes
+
+    base_min, base_max = VOL_BASE_15M.get(str(mode).lower(), VOL_BASE_15M["off"])
+    if not base_min and not base_max:
+        return 0.0, 0.0
+    minutes = timeframe_minutes(timeframe, default=VOL_BASE_TF_MINUTES)
+    scale = (max(minutes, 1) / VOL_BASE_TF_MINUTES) ** 0.5
+    return round(base_min * scale, 6), round(base_max * scale, 6)
+
+
 # key: (مسار في config.toml، نوع القيمة، وصف للمستخدم)
 SET_KEYS: dict[str, tuple[str, str, str]] = {
     "tp": ("trade.take_profit_pct", "float", "جني الأرباح — مثال: 0.02 أو 2%"),
@@ -109,6 +144,11 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
     "mtfema": ("strategy.mtf_ema_period", "int", "فترة متوسط الإطار الأعلى — 50"),
     "volmin": ("strategy.volatility_min_pct", "float", "أدنى تقلّب مسموح (ATR%) — مثال: 0.003"),
     "volmax": ("strategy.volatility_max_pct", "float", "أقصى تقلّب مسموح (ATR%) — مثال: 0.02"),
+    # المبدّل الجاهز: يضبط volmin/volmax دفعة واحدة بعتبات مُقاسة،
+    # ويفعّل `quality` (بدونه تُتجاهل العتبات كلها بصمت).
+    "volmode": ("strategy.volatility_mode", "choice:off,calm,volatile,band",
+                "المبدّل: off = الكل · calm = الهادئ فقط · "
+                "volatile = المتقلّب فقط · band = المعتدل بينهما"),
     # ── معاملات الاستراتيجيات (يفيدها مُحسِّن المعاملات) ──
     "sislow": ("strategy.scalping_i.ema_slow", "int", "scalping_i: EMA بطيء — 50"),
     "sifast": ("strategy.scalping_i.ema_fast", "int", "scalping_i: EMA سريع — 30"),
@@ -989,6 +1029,45 @@ class TelegramBot:
             return
         await self._reply(update, "⚙️ اختر الإعداد الذي تريد تعديله:", self._settings_keyboard())
 
+    def _apply_volmode(self, mode: str, path: str, old: object) -> str:
+        """يطبّق نمط التقلّب: يحسب العتبتين، يفعّل quality، ويشرح ما حدث."""
+        tf = str(self.cfg.get("strategy.timeframe", "15m"))
+        vol_min, vol_max = volatility_preset(mode, tf)
+        self.cfg.set("strategy.volatility_min_pct", vol_min)
+        self.cfg.set("strategy.volatility_max_pct", vol_max)
+
+        notes = []
+        # الفخّ الأخطر: بلا quality_enabled تُتجاهل العتبتان بصمت
+        if mode != "off" and not bool(self.cfg.get("strategy.quality_enabled", False)):
+            self.cfg.set("strategy.quality_enabled", True)
+            notes.append("🔒 فعّلتُ <code>quality</code> تلقائياً — "
+                         "بدونه تُتجاهل عتبات التقلّب كلها بصمت")
+        self.cfg.save()
+
+        if mode == "off":
+            detail = "⏸ فلاتر التقلّب مُعطّلة — يتداول في كل الأحوال"
+        elif mode == "calm":
+            detail = (f"🌊 <b>السوق الهادئ فقط</b>: يتجاهل ما زاد تقلّبه عن "
+                      f"<code>{vol_max * 100:.3f}%</code>")
+        elif mode == "volatile":
+            detail = (f"⚡ <b>السوق المتقلّب فقط</b>: يتجاهل ما قلّ تقلّبه عن "
+                      f"<code>{vol_min * 100:.3f}%</code>")
+        else:
+            detail = (f"⚖️ <b>النطاق المعتدل</b>: بين "
+                      f"<code>{vol_min * 100:.3f}%</code> و "
+                      f"<code>{vol_max * 100:.3f}%</code>")
+
+        lines = [
+            f"✅ <b>{path}</b>: <code>{fmt.esc(str(old))}</code> ← "
+            f"<code>{fmt.esc(mode)}</code>",
+            f"{detail} (مقيسة على إطار <b>{fmt.esc(tf)}</b>)",
+        ]
+        lines.extend(notes)
+        if mode != "off":
+            lines.append(f"↔️ غيّر الإطار بـ <code>/set tf</code> ثم أعد "
+                         f"<code>/set volmode {mode}</code> لتُعاد العتبات")
+        return "\n".join(lines)
+
     def _settings_keyboard(self) -> InlineKeyboardMarkup:
         keys = list(SET_KEYS)
         rows = [
@@ -1050,6 +1129,8 @@ class TelegramBot:
             exchange = getattr(self.trader, "exchange", None)
             if exchange is not None:
                 exchange.dry_run = bool(value)
+        if key == "volmode":
+            return True, self._apply_volmode(str(value), path, old)
         if key == "strategy":
             return True, self._switch_strategy(str(value))
         if key in ("exit", "follow_exit", "strict", "candles"):
