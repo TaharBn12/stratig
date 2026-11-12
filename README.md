@@ -1204,7 +1204,9 @@ stratig/
 
 **Render** (مجاني، يعمل 24/7 بلا جهازك) — أنصح به للبداية.
 قائمة متغيرات البيئة الكاملة (وما هو سرّي منها) في **[docs/env.md](docs/env.md)**.
-شرح **كل أوامر `/set`** (70 أمراً بافتراضياتها) في **[docs/set-commands.md](docs/set-commands.md)**.
+شرح **كل أوامر `/set`** (70 أمراً بافتراضياتها) في **[docs/set-commands.md](docs/set-commands.md)**،
+ونسخة Excel للطباعة والفرز والفلترة: **[docs/stratig-set-commands.xlsx](docs/stratig-set-commands.xlsx)**
+(يُولَّد بـ `python scripts/export_set_excel.py` — بالمكتبة القياسية وحدها).
 ```bash
 # 1. نفّذ supabase/schema.sql مرة واحدة في مشروعك
 # 2. Render → New → Blueprint → اختر المستودع

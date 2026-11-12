@@ -156,6 +156,26 @@ SET_KEYS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# مجالات القيم المسموحة لكل أمر: تُعيد True أو رسالة الخطأ للمستخدم.
+# على مستوى الوحدة (لا داخل الدالّة) ليكون **مصدراً واحداً** تشترك فيه
+# رسالة الخطأ نفسها مع التوثيق وملف Excel (scripts/export_set_excel.py) —
+# فلا يختلف مجال معروض للمستخدم عن مجال مُطبَّق فعلاً.
+SET_CHECKS: dict[str, object] = {
+    "lev": lambda v: 1 <= int(v) <= 125 or "الرافعة بين 1 و 125",
+    "tp": lambda v: 0 < float(v) < 1 or "جني الأرباح بين 0 و 1 (مثال 0.02)",
+    "sl": lambda v: 0 < float(v) < 1 or "وقف الخسارة بين 0 و 1 (مثال 0.01)",
+    "qty": lambda v: float(v) > 0 or "حجم الصفقة يجب أن يكون أكبر من صفر",
+    "interval": lambda v: int(v) >= 30 or "مدة الفحص 30 ثانية على الأقل",
+    "ttl": lambda v: int(v) >= 60 or "مدة الإشارة 60 ثانية على الأقل",
+    "cooldown": lambda v: int(v) >= 0 or "قيمة غير صالحة",
+    "maxpos": lambda v: 1 <= int(v) <= 50 or "أقصى صفقات بين 1 و 50",
+    "topn": lambda v: 0 <= int(v) <= 2000 or "عدد الرموز بين 0 و 2000 (0 = الكل)",
+    "maxsig": lambda v: 1 <= int(v) <= 50 or "أقصى إشارات بين 1 و 50",
+    # أقل من 50 شمعة تكسر المؤشرات، وأكثر من 5000 يبطّئ الفحص بلا فائدة
+    "candles": lambda v: 50 <= int(v) <= 5000 or "عدد الشموع بين 50 و 5000",
+}
+
+
 def restricted(func):
     """يمنع غير المصرّح لهم من استخدام البوت."""
 
@@ -1012,23 +1032,8 @@ class TelegramBot:
                 )
             value = normalized
 
-        # تحققات إضافية
-        checks = {
-            "lev": lambda v: 1 <= int(v) <= 125 or "الرافعة بين 1 و 125",
-            "tp": lambda v: 0 < float(v) < 1 or "جني الأرباح بين 0 و 1 (مثال 0.02)",
-            "sl": lambda v: 0 < float(v) < 1 or "وقف الخسارة بين 0 و 1 (مثال 0.01)",
-            "qty": lambda v: float(v) > 0 or "حجم الصفقة يجب أن يكون أكبر من صفر",
-            "interval": lambda v: int(v) >= 30 or "مدة الفحص 30 ثانية على الأقل",
-            "ttl": lambda v: int(v) >= 60 or "مدة الإشارة 60 ثانية على الأقل",
-            "cooldown": lambda v: int(v) >= 0 or "قيمة غير صالحة",
-            "maxpos": lambda v: 1 <= int(v) <= 50 or "أقصى صفقات بين 1 و 50",
-            "topn": lambda v: 0 <= int(v) <= 2000 or "عدد الرموز بين 0 و 2000 (0 = الكل)",
-            "maxsig": lambda v: 1 <= int(v) <= 50 or "أقصى إشارات بين 1 و 50",
-            # أقل من 50 شمعة تكسر المؤشرات، وأكثر من 5000 يبطّئ الفحص بلا فائدة
-            "candles": lambda v: 50 <= int(v) <= 5000 or "عدد الشموع بين 50 و 5000",
-        }
-        if key in checks:
-            result = checks[key](value)
+        if key in SET_CHECKS:
+            result = SET_CHECKS[key](value)  # type: ignore[operator]
             if result is not True:
                 return False, f"❌ {result}"
 
