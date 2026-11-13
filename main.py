@@ -144,8 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     if keep is not None:
         keep.start()
 
-    bot.run()
-    return 0
+    # نُعيد رمز الخروج: على منصّات النشر (Render) هو الفرق بين «نشر ناجح»
+    # و«نشر فاشل». أن نُعيد 0 دائماً يعني أن البوت الميت يبدو حيّاً.
+    return bot.run()
 
 
 if __name__ == "__main__":

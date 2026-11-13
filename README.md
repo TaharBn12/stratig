@@ -1285,6 +1285,8 @@ docker compose restart        # بعد تعديل .env
 | `(-4120) Order type not supported for this endpoint` | **مُصلح**: نقلت Binance الأوامر الشرطية إلى نقطة Algo — حدّث بـ `update.bat` |
 | `Can't parse entities: unsupported start tag` | **مُصلح**: رموز `<` و `>` في أسباب المؤشرات تُهرَّب الآن، وإن فشل التنسيق يُعاد الإرسال كنص عادي |
 | `maximum number of running instances reached` | مجرد تحذير: دورة فحص سابقة لم تنتهِ. ارفع المدة بـ `/set interval 300` |
+| «نشر ناجح» على Render والبوت لا يعمل | **مُصلح**: `main()` كان يُعيد `0` دائماً فيبدو الفشل نجاحاً — صار رمز الخروج صادقاً، والإقلاع يعيد المحاولة بدل الموت عند أول خطأ شبكة |
+| `can't open file 'scripts/dashboard.py'` | **مُصلح**: `.dockerignore` كان يستثني مجلد `scripts/` فغاب ملف إقلاع اللوحة من الصورة |
 | `الإطار الزمني "..." غير مدعوم` | **مُصلح**: يُصحَّح تلقائياً (`4` → `4h`) ويستمر البوت — لم يعد يرفض التشغيل |
 
 ---
