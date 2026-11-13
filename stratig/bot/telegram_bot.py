@@ -1458,6 +1458,58 @@ class TelegramBot:
             pass
 
     # ═══════════════════ التشغيل ═══════════════════
-    def run(self) -> None:
-        log.info("جارٍ تشغيل البوت…")
-        self.app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # صبر عند الإقلاع: شبكة المنصّة قد تكون بطيئة لحظة النشر
+    POLL_BOOTSTRAP_RETRIES = 12
+    MAX_RESTART_DELAY = 60.0
+
+    def run(self, max_retries: int = 0) -> int:
+        """يشغّل البوت — **ولا يسقط** أمام خطأ شبكة عابر.
+
+        لماذا؟ على منصّات النشر (Render) **موت العملية = نشر فاشل**، ولو كان
+        السبب ومضة شبكة لحظية بيننا وبين تليجرام. واللوحة والمنفذ مفتوحان
+        أصلاً قبل هذه المرحلة، فالأفضل أن نبقى نخدم `/api/health` ونعيد
+        المحاولة بدل أن نموت.
+
+        الاستثناء الوحيد الذي يُسقط عمداً: **التوكن غير الصالح** — لأنه خطأ
+        من عندنا لن يُصلح نفسه، وتعليم النشر فاشلاً أوضح من صمتٍ يخدع.
+
+        `max_retries=0` ⇒ محاولات بلا نهاية (المنصّة تعيد تشغيلنا إن شاءت).
+        """
+        from telegram.error import Conflict, InvalidToken
+
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                log.info("جارٍ تشغيل البوت… (محاولة %s)", attempt)
+                self.app.run_polling(allowed_updates=Update.ALL_TYPES,
+                                     drop_pending_updates=True,
+                                     bootstrap_retries=self.POLL_BOOTSTRAP_RETRIES)
+                return 0
+
+            except InvalidToken:
+                log.error("❌ توكن تليجرام غير صالح (InvalidToken). "
+                          "راجع TELEGRAM_BOT_TOKEN في إعدادات النشر.")
+                return 2
+
+            except Conflict:
+                # الأهم عملياً: نسختان بالتوكن نفسه (ويندوز + Render مثلاً)
+                log.error("❌ نسخة أخرى من البوت تعمل بالتوكن نفسه (409 Conflict). "
+                          "أوقف النسخة الأخرى — أرسل /start لواحدة فقط.")
+
+            except TelegramError as err:
+                log.warning("⚠️ خطأ من تليجرام (%s): %s — سأعيد المحاولة.",
+                            type(err).__name__, err)
+
+            except Exception as err:            # لا نموت لأي سبب آخر
+                log.exception("⚠️ خطأ غير متوقع في حلقة البوت: %s", err)
+
+            if max_retries and attempt >= max_retries:
+                log.error("توقّفت بعد %s محاولة%s.", attempt,
+                          "" if attempt == 1 else "ات")
+                return 1
+
+            delay = min(self.MAX_RESTART_DELAY, 5.0 * attempt)
+            log.info("إعادة المحاولة بعد %.0f ثانية… "
+                     "(اللوحة تعمل و/ api/health يستجيب في هذه الأثناء)", delay)
+            time.sleep(delay)

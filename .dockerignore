@@ -11,5 +11,8 @@ logs
 .env.*
 !.env.example
 tests
-scripts
 *.md
+
+# ⚠️  لا تستثنِ مجلد scripts/: خدمة اللوحة في render.yaml تعمل بـ
+#     `python scripts/dashboard.py` — استثناؤه يجعلها تفشل فور الإقلاع
+#     (can't open file) فيفشل فحص الصحة ويُعلَّم النشر فاشلاً.
